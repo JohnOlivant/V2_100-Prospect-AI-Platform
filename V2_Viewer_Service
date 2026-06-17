@@ -1,0 +1,401 @@
+/***************************************
+ * 100 Prospect AI Platform
+ * V2_Viewer_Service.gs
+ ***************************************/
+
+function v2_viewSelectedProspect() {
+  v2_showSelectedRecordViewer_({
+    requiredSheet: V2_CONFIG.SHEETS.PROSPECT_QUEUE,
+    title: 'Selected Prospect Record',
+    builder: v2_buildProspectViewerHtml_
+  });
+}
+
+function v2_viewSelectedAIResearch() {
+  v2_showSelectedRecordViewer_({
+    requiredSheet: V2_CONFIG.SHEETS.AI_INTELLIGENCE,
+    title: 'Selected AI Research Record',
+    builder: v2_buildAIResearchViewerHtml_
+  });
+}
+
+function v2_viewSelectedOutreachRecord() {
+  v2_showSelectedRecordViewer_({
+    requiredSheet: V2_CONFIG.SHEETS.AI_OUTREACH,
+    title: 'Selected Outreach Record',
+    builder: v2_buildOutreachViewerHtml_
+  });
+}
+
+function v2_showSelectedRecordViewer_(config) {
+  const sheet = SpreadsheetApp.getActiveSheet();
+  const ui = SpreadsheetApp.getUi();
+
+  if (sheet.getName() !== config.requiredSheet) {
+    ui.alert(`Please select a row on the ${config.requiredSheet} tab first.`);
+    return;
+  }
+
+  const row = sheet.getActiveRange().getRow();
+
+  if (row < V2_CONFIG.FIRST_DATA_ROW) {
+    ui.alert('Please select a data row, not the header or button row.');
+    return;
+  }
+
+  const record = v2_getRowAsObject(sheet, row);
+  const html = config.builder(record, row);
+
+  ui.showModalDialog(
+    HtmlService.createHtmlOutput(html).setWidth(950).setHeight(750),
+    config.title
+  );
+}
+
+/***************************************
+ * Prospect Viewer
+ ***************************************/
+
+function v2_buildProspectViewerHtml_(record, rowNumber) {
+  return v2_wrapViewerHtml_(
+    'Prospect Viewer',
+    `${v2_field_(record, 'Company Name')} — Row ${rowNumber}`,
+    `
+    ${v2_section_('Prospect Information', [
+      'Prospect ID', 'Date Added', 'Source', 'Company Name', 'Website',
+      'Industry', 'Location', 'Employee Size', 'Turnover Estimate'
+    ], record)}
+
+    ${v2_section_('Contact Information', [
+      'Contact Name', 'Job Title', 'Email Address', 'Corporate Phone', 'LinkedIn URL'
+    ], record)}
+
+    ${v2_section_('Processing', [
+      'Offer Type', 'Data Completeness Score', 'Duplicate Check Status',
+      'Ready For AI', 'Process Status', 'Last Updated', 'Notes'
+    ], record)}
+    `
+  );
+}
+
+/***************************************
+ * AI Research Viewer
+ ***************************************/
+
+function v2_buildAIResearchViewerHtml_(record, rowNumber) {
+  return v2_wrapViewerHtml_(
+    'AI Research Viewer',
+    `${v2_field_(record, 'Company Name')} — Row ${rowNumber}`,
+    `
+    ${v2_section_('Prospect', [
+      'Intelligence ID', 'Prospect ID', 'Research Date', 'Company Name',
+      'Website', 'Industry', 'Location', 'Employee Size', 'Turnover Estimate',
+      'Contact Name', 'Job Title', 'Email Address'
+    ], record)}
+
+    ${v2_section_('AI Intelligence', [
+      'Company Summary', 'Commercial Summary', 'Business Model Notes',
+      'Growth Signals', 'Pricing Signals', 'Diagnostic Signals',
+      'Exit Readiness Signals', 'Key Pain Points', 'Opportunity Angle'
+    ], record)}
+
+    ${v2_section_('Scoring & Recommendation', [
+      'Recommended Offer Type', 'Prospect Score', 'Lead Fit',
+      'Confidence Score', 'AI Reason'
+    ], record)}
+
+    ${v2_section_('Prompt & Review', [
+      'Research Prompt ID Used', 'AI Model', 'AI Timestamp',
+      'Human Review Status', 'Reviewed By', 'Review Date', 'Review Notes'
+    ], record)}
+    `
+  );
+}
+
+/***************************************
+ * Outreach Viewer
+ ***************************************/
+
+function v2_buildOutreachViewerHtml_(record, rowNumber) {
+  return v2_wrapViewerHtml_(
+    'Outreach Viewer',
+    `${v2_field_(record, 'Company Name')} — Row ${rowNumber}`,
+    `
+    ${v2_section_('Prospect', [
+      'Outreach Asset ID', 'Prospect ID', 'Campaign ID', 'Date Generated',
+      'Company Name', 'Contact Name', 'Email Address', 'Offer Type', 'Lead Fit'
+    ], record)}
+
+    ${v2_section_('Outreach Intelligence', [
+      'Outreach Angle', 'Personalisation Point', 'Key Pain Point', 'Suggested CTA'
+    ], record)}
+
+    <div class="section">
+      <h2>Email Sequence</h2>
+      ${v2_contentBlock_(record, 'Email 1', 'Email 1 Subject', 'Email 1 Body')}
+      ${v2_contentBlock_(record, 'Follow Up 1', 'Follow Up 1 Subject', 'Follow Up 1 Body')}
+      ${v2_contentBlock_(record, 'Follow Up 2', 'Follow Up 2 Subject', 'Follow Up 2 Body')}
+      ${v2_contentBlock_(record, 'Follow Up 3', 'Follow Up 3 Subject', 'Follow Up 3 Body')}
+    </div>
+
+    <div class="section">
+      <h2>Other Outreach Assets</h2>
+      ${v2_textBlock_(record, 'LinkedIn Connection Message')}
+      ${v2_textBlock_(record, 'LinkedIn Follow-Up Message')}
+      ${v2_textBlock_(record, 'Call Opener')}
+      ${v2_textBlock_(record, 'Voicemail Script')}
+    </div>
+
+    ${v2_section_('Approval & CRM', [
+      'Outreach Prompt ID Used', 'AI Model', 'Generation Timestamp',
+      'Approval Status', 'Approved By', 'Approval Date', 'Revision Notes',
+      'CRM Status', 'FluentCRM Contact ID', 'Push Date', 'Sync Result'
+    ], record)}
+    `
+  );
+}
+
+/***************************************
+ * Shared HTML Helpers
+ ***************************************/
+
+function v2_wrapViewerHtml_(title, subtitle, bodyHtml) {
+  return `
+    <!DOCTYPE html>
+    <html>
+      <head>
+        <base target="_top">
+        ${v2_viewerStyles_()}
+      </head>
+      <body>
+        <div class="wrapper">
+          <div class="toolbar no-print">
+            <button onclick="window.print()">Print / Save as PDF</button>
+          </div>
+
+          <div class="header">
+            <h1>${title}</h1>
+            <p>${subtitle}</p>
+          </div>
+
+          ${bodyHtml}
+
+          <div class="footer no-print">
+            <button onclick="google.script.host.close()">Close</button>
+          </div>
+        </div>
+      </body>
+    </html>
+  `;
+}
+
+function v2_section_(title, fields, record) {
+  return `
+    <div class="section">
+      <h2>${title}</h2>
+      <div class="grid">
+        ${fields.map(field => v2_infoRow_(record, field)).join('')}
+      </div>
+    </div>
+  `;
+}
+
+function v2_infoRow_(record, label) {
+  return `
+    <div class="info-row">
+      <div class="label">${label}</div>
+      <div class="value">${v2_field_(record, label)}</div>
+    </div>
+  `;
+}
+
+function v2_contentBlock_(record, title, subjectField, bodyField) {
+  return `
+    <div class="content-block">
+      <h3>${title}</h3>
+      <div class="subject"><strong>Subject:</strong> ${v2_field_(record, subjectField)}</div>
+      <div class="body">${v2_field_(record, bodyField)}</div>
+    </div>
+  `;
+}
+
+function v2_textBlock_(record, field) {
+  return `
+    <div class="content-block">
+      <h3>${field}</h3>
+      <div class="body">${v2_field_(record, field)}</div>
+    </div>
+  `;
+}
+
+function v2_field_(record, label) {
+  const value = record[label];
+
+  if (value === null || value === undefined || value === '') {
+    return '<span class="muted">Not populated</span>';
+  }
+
+  return String(value)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/\n/g, '<br>');
+}
+
+function v2_viewerStyles_() {
+  return `
+    <style>
+      body {
+        font-family: Arial, sans-serif;
+        margin: 0;
+        padding: 0;
+        background: #f8fafc;
+        color: #111827;
+      }
+
+      .wrapper {
+        padding: 24px;
+      }
+
+      .toolbar {
+        margin-bottom: 18px;
+      }
+
+      .header {
+        background: #111827;
+        color: #ffffff;
+        padding: 20px;
+        border-radius: 14px;
+        margin-bottom: 20px;
+      }
+
+      .header h1 {
+        margin: 0 0 8px 0;
+        font-size: 24px;
+      }
+
+      .header p {
+        margin: 0;
+        color: #d1d5db;
+        font-size: 14px;
+      }
+
+      .section {
+        background: #ffffff;
+        border: 1px solid #e5e7eb;
+        border-radius: 14px;
+        padding: 18px;
+        margin-bottom: 18px;
+      }
+
+      .section h2 {
+        margin: 0 0 14px 0;
+        font-size: 18px;
+        color: #111827;
+        border-bottom: 1px solid #e5e7eb;
+        padding-bottom: 8px;
+      }
+
+      .grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 12px 18px;
+      }
+
+      .info-row {
+        margin-bottom: 10px;
+      }
+
+      .label {
+        font-size: 12px;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+        color: #6b7280;
+        font-weight: bold;
+        margin-bottom: 4px;
+      }
+
+      .value {
+        font-size: 14px;
+        line-height: 1.5;
+        color: #111827;
+        background: #f9fafb;
+        border: 1px solid #e5e7eb;
+        padding: 10px;
+        border-radius: 10px;
+        min-height: 20px;
+      }
+
+      .content-block {
+        border: 1px solid #e5e7eb;
+        background: #f9fafb;
+        border-radius: 12px;
+        padding: 14px;
+        margin-bottom: 14px;
+      }
+
+      .content-block h3 {
+        margin: 0 0 10px 0;
+        font-size: 16px;
+      }
+
+      .subject {
+        background: #ffffff;
+        border: 1px solid #e5e7eb;
+        padding: 10px;
+        border-radius: 10px;
+        margin-bottom: 10px;
+        font-size: 14px;
+      }
+
+      .body {
+        background: #ffffff;
+        border: 1px solid #e5e7eb;
+        padding: 12px;
+        border-radius: 10px;
+        line-height: 1.6;
+        font-size: 14px;
+        white-space: normal;
+      }
+
+      .muted {
+        color: #9ca3af;
+        font-style: italic;
+      }
+
+      .footer {
+        text-align: right;
+        margin-top: 20px;
+      }
+
+      button {
+        background: #111827;
+        color: #ffffff;
+        border: none;
+        padding: 10px 18px;
+        border-radius: 8px;
+        cursor: pointer;
+        font-size: 14px;
+      }
+
+      button:hover {
+        background: #374151;
+      }
+
+      @media print {
+        .no-print {
+          display: none !important;
+        }
+
+        body {
+          background: #ffffff;
+          font-size: 12pt;
+        }
+
+        .section {
+          page-break-inside: avoid;
+        }
+      }
+    </style>
+  `;
+}
