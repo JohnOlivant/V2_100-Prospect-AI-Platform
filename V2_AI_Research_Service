@@ -1,0 +1,325 @@
+/***************************************
+ * 100 Prospect AI Platform
+ * V2_AI_Research_Service.gs
+ * Processes Prospect Queue records into AI Intelligence Repository
+ ***************************************/
+
+function v2_processReadyProspects() {
+  const prospectSheet = v2_getConfiguredSheet('PROSPECT_QUEUE');
+  const intelligenceSheet = v2_getConfiguredSheet('AI_INTELLIGENCE');
+
+  const prospects = v2_getDataAsObjects(prospectSheet);
+
+  const readyProspects = prospects.filter(row => {
+    return (
+      v2_toBoolean(row['Ready For AI']) &&
+      ['new', 'error', ''].includes(v2_normaliseText(row['Process Status']))
+    );
+  });
+
+  if (readyProspects.length === 0) {
+    SpreadsheetApp.getUi().alert('No prospects are ready for AI processing.');
+    return;
+  }
+
+  let processed = 0;
+  let failed = 0;
+
+  readyProspects.forEach(prospect => {
+    try {
+      v2_processSingleProspectResearch_(prospectSheet, intelligenceSheet, prospect);
+      processed++;
+    } catch (error) {
+      failed++;
+
+      v2_updateRowFields(prospectSheet, prospect._rowNumber, {
+        'Process Status': V2_CONFIG.STATUS.PROCESS.ERROR,
+        'Last Updated': new Date()
+      });
+
+      v2_logException(
+        prospect['Prospect ID'] || '',
+        'AI Research Service',
+        'v2_processReadyProspects',
+        error,
+        JSON.stringify(prospect),
+        ''
+      );
+    }
+  });
+
+  SpreadsheetApp.getUi().alert(
+    `AI Research Processing Complete\n\nProcessed: ${processed}\nFailed: ${failed}`
+  );
+}
+
+
+function v2_processSingleProspectResearch_(prospectSheet, intelligenceSheet, prospect) {
+  const rowNumber = prospect._rowNumber;
+
+  let prospectId = prospect['Prospect ID'];
+
+  if (v2_isBlank(prospectId)) {
+    prospectId = v2_getNextProspectId();
+
+    v2_updateRowFields(prospectSheet, rowNumber, {
+      'Prospect ID': prospectId
+    });
+
+    prospect['Prospect ID'] = prospectId;
+  }
+
+  v2_updateRowFields(prospectSheet, rowNumber, {
+    'Process Status': V2_CONFIG.STATUS.PROCESS.PROCESSING,
+    'Last Updated': new Date()
+  });
+
+  v2_logInfo(
+    prospectId,
+    'AI Research Service',
+    'v2_processSingleProspectResearch_',
+    'PROCESS_STARTED',
+    'Started AI research processing.',
+    JSON.stringify(prospect),
+    ''
+  );
+
+  const offerType = prospect['Offer Type'];
+
+  if (v2_isBlank(offerType)) {
+    throw new Error(`Offer Type is missing for prospect ${prospectId}`);
+  }
+
+  const prompt = v2_getResearchPrompt(offerType);
+  const validation = v2_validatePrompt(prompt);
+
+  if (!validation.valid) {
+    throw new Error(
+      `Research prompt is invalid. Missing fields: ${validation.missingFields.join(', ')}`
+    );
+  }
+
+  const variables = v2_buildPromptVariablesFromRow(prospect);
+  const mergedPrompt = v2_mergePrompt(prompt['Prompt Text'], variables);
+
+  const model = prompt['Model'] || 'gpt-4.1-mini';
+  const temperature = prompt['Temperature'] !== '' ? Number(prompt['Temperature']) : 0.3;
+  const maxTokens = prompt['Max Tokens'] || 1500;
+
+  const aiResponse = v2_callOpenAIJson({
+    model: model,
+    input: mergedPrompt,
+    temperature: temperature,
+    maxTokens: maxTokens
+  });
+
+  const research = aiResponse.json;
+
+  const intelligenceId = v2_getNextIntelligenceId();
+
+  const intelligenceRecord = v2_buildIntelligenceRecord_({
+    intelligenceId: intelligenceId,
+    prospectId: prospectId,
+    prospect: prospect,
+    research: research,
+    prompt: prompt,
+    model: model
+  });
+
+  v2_appendObjectRow(intelligenceSheet, intelligenceRecord);
+
+  v2_updateRowFields(prospectSheet, rowNumber, {
+    'Process Status': V2_CONFIG.STATUS.PROCESS.AI_PROCESSED,
+    'Last Updated': new Date()
+  });
+
+  v2_logInfo(
+    prospectId,
+    'AI Research Service',
+    'v2_processSingleProspectResearch_',
+    'PROCESS_COMPLETE',
+    'AI research completed and written to AI Intelligence Repository.',
+    mergedPrompt,
+    JSON.stringify(research)
+  );
+}
+
+
+function v2_buildIntelligenceRecord_(data) {
+  const prospect = data.prospect;
+  const research = data.research || {};
+  const prompt = data.prompt || {};
+
+  const prospectScore = v2_firstAvailable_(research, [
+    'prospect_score',
+    'Prospect Score',
+    'score',
+    'opportunity_score'
+  ]);
+
+  const confidenceScore = v2_firstAvailable_(research, [
+    'confidence_score',
+    'Confidence Score',
+    'confidence'
+  ]);
+
+  const recommendedOffer = v2_firstAvailable_(research, [
+    'recommended_offer_type',
+    'Recommended Offer Type',
+    'recommended_offer',
+    'offer_type'
+  ]);
+
+  const leadFit = v2_firstAvailable_(research, [
+    'lead_fit',
+    'Lead Fit'
+  ]) || v2_calculateLeadFit_(prospectScore);
+
+  return {
+    'Intelligence ID': data.intelligenceId,
+    'Prospect ID': data.prospectId,
+    'Research Date': new Date(),
+
+    'Company Name': prospect['Company Name'] || '',
+    'Website': prospect['Website'] || '',
+    'Industry': prospect['Industry'] || '',
+    'Location': prospect['Location'] || '',
+    'Employee Size': prospect['Employee Size'] || '',
+    'Turnover Estimate': prospect['Turnover Estimate'] || '',
+    'Contact Name': prospect['Contact Name'] || '',
+    'Job Title': prospect['Job Title'] || '',
+    'Email Address': prospect['Email Address'] || '',
+
+    'Company Summary': v2_firstAvailable_(research, [
+      'company_summary',
+      'Company Summary',
+      'summary'
+    ]),
+
+    'Commercial Summary': v2_firstAvailable_(research, [
+      'commercial_summary',
+      'Commercial Summary'
+    ]),
+
+    'Business Model Notes': v2_firstAvailable_(research, [
+      'business_model_notes',
+      'Business Model Notes',
+      'business_model'
+    ]),
+
+    'Growth Signals': v2_firstAvailable_(research, [
+      'growth_signals',
+      'Growth Signals'
+    ]),
+
+    'Pricing Signals': v2_firstAvailable_(research, [
+      'pricing_signals',
+      'Pricing Signals'
+    ]),
+
+    'Diagnostic Signals': v2_firstAvailable_(research, [
+      'diagnostic_signals',
+      'Diagnostic Signals',
+      'business_diagnostic_signals'
+    ]),
+
+    'Exit Readiness Signals': v2_firstAvailable_(research, [
+      'exit_readiness_signals',
+      'Exit Readiness Signals',
+      'exit_signals'
+    ]),
+
+    'Key Pain Points': v2_firstAvailable_(research, [
+      'key_pain_points',
+      'Key Pain Points',
+      'pain_points'
+    ]),
+
+    'Opportunity Angle': v2_firstAvailable_(research, [
+      'opportunity_angle',
+      'Opportunity Angle',
+      'outreach_angle'
+    ]),
+
+    'Recommended Offer Type': recommendedOffer || prospect['Offer Type'] || '',
+    'Prospect Score': prospectScore || '',
+    'Lead Fit': leadFit || '',
+    'Confidence Score': confidenceScore || '',
+    'AI Reason': v2_firstAvailable_(research, [
+      'ai_reason',
+      'AI Reason',
+      'reason',
+      'rationale'
+    ]),
+
+    'Research Prompt ID Used': prompt['Prompt ID'] || '',
+    'AI Model': data.model || '',
+    'AI Timestamp': new Date(),
+
+    'Human Review Status': V2_CONFIG.STATUS.HUMAN_REVIEW.PENDING,
+    'Reviewed By': '',
+    'Review Date': '',
+    'Review Notes': ''
+  };
+}
+
+
+function v2_firstAvailable_(objectData, possibleKeys) {
+  for (let i = 0; i < possibleKeys.length; i++) {
+    const key = possibleKeys[i];
+
+    if (
+      objectData &&
+      Object.prototype.hasOwnProperty.call(objectData, key) &&
+      !v2_isBlank(objectData[key])
+    ) {
+      if (Array.isArray(objectData[key])) {
+        return objectData[key].join('\n');
+      }
+
+      if (typeof objectData[key] === 'object') {
+        return JSON.stringify(objectData[key]);
+      }
+
+      return objectData[key];
+    }
+  }
+
+  return '';
+}
+
+
+function v2_calculateLeadFit_(score) {
+  const numericScore = Number(score);
+
+  if (isNaN(numericScore)) return '';
+
+  if (numericScore >= 80) return 'Very High Fit';
+  if (numericScore >= 65) return 'Strong Fit';
+  if (numericScore >= 50) return 'Moderate Fit';
+  if (numericScore >= 35) return 'Weak Fit';
+
+  return 'Poor Fit';
+}
+
+
+/**
+ * Test helper.
+ * Does not call OpenAI.
+ * Checks how many rows are currently ready.
+ */
+function v2_testResearchReadiness() {
+  const prospectSheet = v2_getConfiguredSheet('PROSPECT_QUEUE');
+  const prospects = v2_getDataAsObjects(prospectSheet);
+
+  const readyProspects = prospects.filter(row => {
+    return (
+      v2_toBoolean(row['Ready For AI']) &&
+      ['new', 'error', ''].includes(v2_normaliseText(row['Process Status']))
+    );
+  });
+
+  SpreadsheetApp.getUi().alert(
+    `Research Readiness Test\n\nReady prospects found: ${readyProspects.length}`
+  );
+}
