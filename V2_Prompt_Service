@@ -1,322 +1,316 @@
 /***************************************
  * 100 Prospect AI Platform
- * V2_Base_Service.gs
- * Shared spreadsheet helper functions
+ * V2_Prompt_Service.gs
+ * Central Prompt Library service
  ***************************************/
 
 /**
- * Gets the active spreadsheet.
+ * Returns all prompt rows as objects.
  */
-function v2_getSpreadsheet() {
-  return SpreadsheetApp.getActiveSpreadsheet();
+function v2_getAllPrompts() {
+  const sheet = v2_getConfiguredSheet('PROMPT_LIBRARY');
+  return v2_getDataAsObjects(sheet);
 }
 
 
 /**
- * Gets a sheet by name.
- * Throws a clear error if missing.
+ * Gets a prompt by Prompt ID.
  */
-function v2_getSheet(sheetName) {
-  const ss = v2_getSpreadsheet();
-  const sheet = ss.getSheetByName(sheetName);
-
-  if (!sheet) {
-    throw new Error(`Sheet not found: ${sheetName}`);
+function v2_getPromptById(promptId) {
+  if (v2_isBlank(promptId)) {
+    throw new Error('Prompt ID is required.');
   }
 
-  return sheet;
-}
+  const prompts = v2_getAllPrompts();
 
-
-/**
- * Gets a sheet using a V2_CONFIG.SHEETS key.
- * Example: v2_getConfiguredSheet('PROSPECT_QUEUE')
- */
-function v2_getConfiguredSheet(sheetKey) {
-  if (!V2_CONFIG.SHEETS[sheetKey]) {
-    throw new Error(`Unknown sheet key: ${sheetKey}`);
-  }
-
-  return v2_getSheet(V2_CONFIG.SHEETS[sheetKey]);
-}
-
-
-/**
- * Returns the header row as clean strings.
- */
-function v2_getHeaders(sheet) {
-  const lastCol = sheet.getLastColumn();
-
-  if (lastCol === 0) {
-    return [];
-  }
-
-  return sheet
-    .getRange(1, 1, 1, lastCol)
-    .getValues()[0]
-    .map(header => String(header).trim());
-}
-
-
-/**
- * Returns zero-based column index by header name.
- */
-function v2_getHeaderIndex(sheet, headerName) {
-  const headers = v2_getHeaders(sheet);
-  return headers.indexOf(headerName);
-}
-
-
-/**
- * Returns one-based column number by header name.
- * Throws if missing.
- */
-function v2_getColumnNumber(sheet, headerName) {
-  const index = v2_getHeaderIndex(sheet, headerName);
-
-  if (index === -1) {
-    throw new Error(`Header not found: ${headerName} on sheet ${sheet.getName()}`);
-  }
-
-  return index + 1;
-}
-
-
-/**
- * Returns an object map of header name → one-based column number.
- */
-function v2_getColumnMap(sheet) {
-  const headers = v2_getHeaders(sheet);
-  const map = {};
-
-  headers.forEach((header, index) => {
-    if (header) {
-      map[header] = index + 1;
-    }
+  const prompt = prompts.find(row => {
+    return String(row['Prompt ID']).trim() === String(promptId).trim();
   });
 
-  return map;
+  if (!prompt) {
+    throw new Error(`Prompt not found: ${promptId}`);
+  }
+
+  return prompt;
 }
 
 
 /**
- * Converts a sheet row into an object using headers.
- * Example:
- * {
- *   "Prospect ID": "R29-000001",
- *   "Company Name": "ABC Ltd"
- * }
+ * Finds the best active approved V2 prompt based on filters.
+ *
+ * filters can include:
+ * - promptCategory
+ * - offerType
+ * - workflowStage
+ * - triggerEvent
+ * - usedIn
  */
-function v2_getRowAsObject(sheet, rowNumber) {
-  const headers = v2_getHeaders(sheet);
-  const lastCol = headers.length;
+function v2_findPrompt(filters) {
+  filters = filters || {};
 
-  if (rowNumber < 1) {
-    throw new Error('Row number must be 1 or greater.');
-  }
+  const prompts = v2_getAllPrompts();
 
-  if (lastCol === 0) {
-    throw new Error(`Sheet has no headers: ${sheet.getName()}`);
-  }
+  const matches = prompts.filter(prompt => {
+    const activeStatus = v2_normaliseText(prompt['Active Status']);
+    const promptStatus = v2_normaliseText(prompt['Prompt Status']);
+    const usedIn = v2_normaliseText(prompt['Used In']);
 
-  const values = sheet.getRange(rowNumber, 1, 1, lastCol).getValues()[0];
-  const obj = {};
+    if (activeStatus !== 'active') return false;
+    if (promptStatus !== 'approved') return false;
 
-  headers.forEach((header, index) => {
-    if (header) {
-      obj[header] = values[index];
+    if (filters.usedIn) {
+      const requiredUsedIn = v2_normaliseText(filters.usedIn);
+      if (!(usedIn === requiredUsedIn || usedIn === 'both')) return false;
+    } else {
+      if (!(usedIn === 'v2' || usedIn === 'both')) return false;
     }
-  });
 
-  return obj;
-}
-
-
-/**
- * Converts all data rows into objects.
- */
-function v2_getDataAsObjects(sheet) {
-  const headers = v2_getHeaders(sheet);
-  const lastRow = sheet.getLastRow();
-  const lastCol = headers.length;
-
-  if (lastRow < V2_CONFIG.FIRST_DATA_ROW || lastCol === 0) {
-    return [];
-  }
-
-  const values = sheet
-    .getRange(V2_CONFIG.FIRST_DATA_ROW, 1, lastRow - V2_CONFIG.FIRST_DATA_ROW + 1, lastCol)
-    .getValues();
-
-  return values.map((row, rowIndex) => {
-    const obj = {
-      _rowNumber: V2_CONFIG.FIRST_DATA_ROW + rowIndex
-    };
-
-    headers.forEach((header, index) => {
-      if (header) {
-        obj[header] = row[index];
+    if (filters.promptCategory) {
+      if (v2_normaliseText(prompt['Prompt Category']) !== v2_normaliseText(filters.promptCategory)) {
+        return false;
       }
+    }
+
+    if (filters.offerType) {
+      if (v2_normaliseText(prompt['Offer Type']) !== v2_normaliseText(filters.offerType)) {
+        return false;
+      }
+    }
+
+    if (filters.workflowStage) {
+      if (v2_normaliseText(prompt['Workflow Stage']) !== v2_normaliseText(filters.workflowStage)) {
+        return false;
+      }
+    }
+
+    if (filters.triggerEvent) {
+      if (v2_normaliseText(prompt['Trigger Event']) !== v2_normaliseText(filters.triggerEvent)) {
+        return false;
+      }
+    }
+
+    return true;
+  });
+
+  if (matches.length === 0) {
+    throw new Error(
+      'No active approved V2 prompt found for filters: ' +
+      JSON.stringify(filters)
+    );
+  }
+
+  if (matches.length > 1) {
+    // Sort by version descending if possible, otherwise use first match.
+    matches.sort((a, b) => {
+      const versionA = Number(String(a['Version']).replace(/[^\d.]/g, '')) || 0;
+      const versionB = Number(String(b['Version']).replace(/[^\d.]/g, '')) || 0;
+      return versionB - versionA;
     });
-
-    return obj;
-  });
-}
-
-
-/**
- * Appends an object as a row based on matching headers.
- * Missing values are written as blank.
- */
-function v2_appendObjectRow(sheet, objectData) {
-  const headers = v2_getHeaders(sheet);
-
-  if (headers.length === 0) {
-    throw new Error(`Cannot append row. Sheet has no headers: ${sheet.getName()}`);
   }
 
-  const row = headers.map(header => {
-    return Object.prototype.hasOwnProperty.call(objectData, header)
-      ? objectData[header]
-      : '';
-  });
-
-  const firstHeader = headers[0];
-  const nextRow = v2_getNextEmptyRowByColumn(sheet, firstHeader);
-
-  sheet.getRange(nextRow, 1, 1, row.length).setValues([row]);
-
-  return nextRow;
+  return matches[0];
 }
 
+
 /**
- * Updates selected fields on a row using header names.
+ * Gets the active research prompt for an offer type.
  */
-function v2_updateRowFields(sheet, rowNumber, fieldValues) {
-  if (rowNumber < V2_CONFIG.FIRST_DATA_ROW) {
-    throw new Error(`Cannot update header row on sheet: ${sheet.getName()}`);
+function v2_getResearchPrompt(offerType) {
+  return v2_findPrompt({
+    promptCategory: 'Research',
+    offerType: offerType,
+    workflowStage: 'Prospect Research',
+    usedIn: 'V2'
+  });
+}
+
+
+/**
+ * Gets the active outreach prompt for an offer type.
+ */
+function v2_getOutreachPrompt(offerType) {
+  return v2_findPrompt({
+    promptCategory: 'Outreach',
+    offerType: offerType,
+    workflowStage: 'Outreach Generation',
+    usedIn: 'V2'
+  });
+}
+
+
+/**
+ * Gets the active meeting brief prompt for an offer type.
+ */
+function v2_getMeetingBriefPrompt(offerType) {
+  return v2_findPrompt({
+    promptCategory: 'Meeting Brief',
+    offerType: offerType,
+    workflowStage: 'Meeting Preparation',
+    usedIn: 'V2'
+  });
+}
+
+
+/**
+ * Replaces placeholders inside prompt text.
+ *
+ * Supports:
+ * {{Company Name}}
+ * {{company_name}}
+ * [Company Name]
+ * [company_name variable]
+ */
+function v2_mergePrompt(promptText, variables) {
+  if (v2_isBlank(promptText)) {
+    throw new Error('Prompt text is blank.');
   }
 
-  Object.keys(fieldValues).forEach(fieldName => {
-    const colNumber = v2_getColumnNumber(sheet, fieldName);
-    sheet.getRange(rowNumber, colNumber).setValue(fieldValues[fieldName]);
+  variables = variables || {};
+
+  let merged = String(promptText);
+
+  Object.keys(variables).forEach(key => {
+    const value = variables[key] === null || variables[key] === undefined
+      ? ''
+      : String(variables[key]);
+
+    const snakeKey = v2_toSnakeCase_(key);
+
+    const patterns = [
+      new RegExp('{{\\s*' + v2_escapeRegExp_(key) + '\\s*}}', 'gi'),
+      new RegExp('{{\\s*' + v2_escapeRegExp_(snakeKey) + '\\s*}}', 'gi'),
+      new RegExp('\\[\\s*' + v2_escapeRegExp_(key) + '\\s*\\]', 'gi'),
+      new RegExp('\\[\\s*' + v2_escapeRegExp_(snakeKey) + '\\s*\\]', 'gi'),
+      new RegExp('\\[\\s*' + v2_escapeRegExp_(key) + '\\s+variable\\s*\\]', 'gi'),
+      new RegExp('\\[\\s*' + v2_escapeRegExp_(snakeKey) + '\\s+variable\\s*\\]', 'gi')
+    ];
+
+    patterns.forEach(pattern => {
+      merged = merged.replace(pattern, value);
+    });
   });
+
+  return merged;
 }
 
 
 /**
- * Finds the first row number where a field equals a value.
- * Returns null if not found.
+ * Converts common sheet row fields into prompt variables.
  */
-function v2_findRowByField(sheet, fieldName, valueToFind) {
-  const data = v2_getDataAsObjects(sheet);
+function v2_buildPromptVariablesFromRow(rowObject) {
+  const variables = {};
 
-  const match = data.find(row => {
-    return String(row[fieldName]).trim() === String(valueToFind).trim();
+  Object.keys(rowObject).forEach(key => {
+    if (key === '_rowNumber') return;
+
+    variables[key] = rowObject[key];
+    variables[v2_toSnakeCase_(key)] = rowObject[key];
   });
 
-  return match ? match._rowNumber : null;
+  return variables;
 }
 
 
 /**
- * Finds all row objects where a field equals a value.
+ * Validates that a prompt has core required fields.
  */
-function v2_findRowsByField(sheet, fieldName, valueToFind) {
-  const data = v2_getDataAsObjects(sheet);
+function v2_validatePrompt(prompt) {
+  const requiredFields = [
+    'Prompt ID',
+    'Prompt Name',
+    'Prompt Category',
+    'Workflow Stage',
+    'Prompt Text',
+    'Model'
+  ];
 
-  return data.filter(row => {
-    return String(row[fieldName]).trim() === String(valueToFind).trim();
-  });
+  const missing = requiredFields.filter(field => v2_isBlank(prompt[field]));
+
+  return {
+    valid: missing.length === 0,
+    missingFields: missing
+  };
 }
 
 
 /**
- * Simple blank check.
+ * Converts text to snake_case.
  */
-function v2_isBlank(value) {
-  return value === null || value === undefined || String(value).trim() === '';
+function v2_toSnakeCase_(value) {
+  return String(value || '')
+    .trim()
+    .replace(/([a-z])([A-Z])/g, '$1_$2')
+    .replace(/[^a-zA-Z0-9]+/g, '_')
+    .replace(/^_+|_+$/g, '')
+    .toLowerCase();
 }
 
 
 /**
- * Normalises text for comparisons.
+ * Escapes special characters for RegExp construction.
  */
-function v2_normaliseText(value) {
-  return String(value || '').trim().toLowerCase();
+function v2_escapeRegExp_(value) {
+  return String(value || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
 
 /**
- * Converts truthy sheet values to boolean.
+ * Test 1: test retrieval by prompt ID.
+ * Change TEST_PROMPT_ID to one that exists in your Prompt Library.
  */
-function v2_toBoolean(value) {
-  if (value === true) return true;
-  if (value === false) return false;
+function v2_testPromptById() {
+  const TEST_PROMPT_ID = 'PR-001';
 
-  const normalised = v2_normaliseText(value);
-
-  return ['true', 'yes', 'y', '1', 'active', 'approved'].includes(normalised);
-}
-
-
-/**
- * Returns current user email if available.
- */
-function v2_getCurrentUserEmail() {
-  try {
-    return Session.getActiveUser().getEmail() || '';
-  } catch (error) {
-    return '';
-  }
-}
-
-
-/**
- * Test function.
- */
-function v2_testBaseService() {
-  const sheet = v2_getConfiguredSheet('SYSTEM_COUNTERS');
-  const headers = v2_getHeaders(sheet);
-  const rows = v2_getDataAsObjects(sheet);
-
-  const message =
-    `Base Service Test Complete\n\n` +
-    `Sheet: ${sheet.getName()}\n` +
-    `Headers Found: ${headers.length}\n` +
-    `Data Rows Found: ${rows.length}\n\n` +
-    `First Counter Type: ${rows.length ? rows[0]['Counter Type'] : 'None'}`;
+  const prompt = v2_getPromptById(TEST_PROMPT_ID);
+  const validation = v2_validatePrompt(prompt);
 
   v2_logInfo(
     '',
-    'Base Service',
-    'v2_testBaseService',
+    'Prompt Service',
+    'v2_testPromptById',
     'TEST',
-    'Base service test completed successfully.',
+    `Prompt retrieved: ${prompt['Prompt ID']} - ${prompt['Prompt Name']}`,
     '',
-    message
+    JSON.stringify(validation)
   );
 
-  SpreadsheetApp.getUi().alert(message);
+  SpreadsheetApp.getUi().alert(
+    `Prompt Service Test Complete\n\n` +
+    `Prompt ID: ${prompt['Prompt ID']}\n` +
+    `Prompt Name: ${prompt['Prompt Name']}\n` +
+    `Valid: ${validation.valid}\n` +
+    `Missing Fields: ${validation.missingFields.join(', ') || 'None'}`
+  );
 }
-function v2_getNextEmptyRowByColumn(sheet, headerName) {
-  const colNumber = v2_getColumnNumber(sheet, headerName);
-  const maxRows = sheet.getMaxRows();
 
-  const values = sheet
-    .getRange(
-      V2_CONFIG.FIRST_DATA_ROW,
-      colNumber,
-      maxRows - V2_CONFIG.FIRST_DATA_ROW + 1,
-      1
-    )
-    .getValues();
 
-  for (let i = 0; i < values.length; i++) {
-    if (v2_isBlank(values[i][0])) {
-      return V2_CONFIG.FIRST_DATA_ROW + i;
-    }
-  }
+/**
+ * Test 2: test merge logic.
+ */
+function v2_testPromptMerge() {
+  const promptText =
+    'Analyse {{Company Name}} based in [Location]. Contact: [contact_name variable]. Offer: {{offer_type}}.';
 
-  return sheet.getLastRow() + 1;
+  const variables = {
+    'Company Name': 'Example Ltd',
+    'Location': 'Hull',
+    'Contact Name': 'Jane Smith',
+    'Offer Type': 'Business Diagnostics'
+  };
+
+  const merged = v2_mergePrompt(promptText, variables);
+
+  v2_logInfo(
+    '',
+    'Prompt Service',
+    'v2_testPromptMerge',
+    'TEST',
+    'Prompt merge test completed.',
+    promptText,
+    merged
+  );
+
+  SpreadsheetApp.getUi().alert(
+    `Prompt Merge Test Complete\n\n${merged}`
+  );
 }
