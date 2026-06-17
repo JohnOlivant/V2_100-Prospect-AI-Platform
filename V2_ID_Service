@@ -1,0 +1,146 @@
+/***************************************
+ * 100 Prospect AI Platform
+ * V2_ID_Service.gs
+ * Central ID generation service
+ ***************************************/
+
+/**
+ * Public function.
+ * Returns the next ID for a given counter type.
+ *
+ * Example:
+ * v2_getNextId('Prospect ID') → R29-000001
+ */
+function v2_getNextId(counterType) {
+  if (!counterType) {
+    throw new Error('Counter type is required.');
+  }
+
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sheet = ss.getSheetByName(V2_CONFIG.SHEETS.SYSTEM_COUNTERS);
+
+  if (!sheet) {
+    throw new Error(`Missing sheet: ${V2_CONFIG.SHEETS.SYSTEM_COUNTERS}`);
+  }
+
+  const lock = LockService.getScriptLock();
+
+  try {
+    lock.waitLock(30000);
+
+    const data = sheet.getDataRange().getValues();
+
+    if (data.length < 2) {
+      throw new Error('System Counters sheet has no counter rows.');
+    }
+
+    const headers = data[0].map(h => String(h).trim());
+
+    const col = {
+      counterType: headers.indexOf('Counter Type'),
+      prefix: headers.indexOf('Prefix'),
+      lastNumberUsed: headers.indexOf('Last Number Used'),
+      lastIdCreated: headers.indexOf('Last ID Created'),
+      lastUpdated: headers.indexOf('Last Updated')
+    };
+
+    Object.keys(col).forEach(key => {
+      if (col[key] === -1) {
+        throw new Error(`System Counters missing required header: ${key}`);
+      }
+    });
+
+    const targetRowIndex = data.findIndex((row, index) => {
+      if (index === 0) return false;
+      return String(row[col.counterType]).trim() === counterType;
+    });
+
+    if (targetRowIndex === -1) {
+      throw new Error(`Counter type not found: ${counterType}`);
+    }
+
+    const row = data[targetRowIndex];
+
+    const prefix = String(row[col.prefix]).trim();
+
+    if (!prefix) {
+      throw new Error(`Prefix missing for counter type: ${counterType}`);
+    }
+
+    const lastNumber = Number(row[col.lastNumberUsed]) || 0;
+    const nextNumber = lastNumber + 1;
+    const nextId = `${prefix}-${String(nextNumber).padStart(6, '0')}`;
+
+    const sheetRowNumber = targetRowIndex + 1;
+
+    sheet.getRange(sheetRowNumber, col.lastNumberUsed + 1).setValue(nextNumber);
+    sheet.getRange(sheetRowNumber, col.lastIdCreated + 1).setValue(nextId);
+    sheet.getRange(sheetRowNumber, col.lastUpdated + 1).setValue(new Date());
+
+    return nextId;
+
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+
+/**
+ * Convenience wrappers.
+ */
+
+function v2_getNextProspectId() {
+  return v2_getNextId('Prospect ID');
+}
+
+function v2_getNextIntelligenceId() {
+  return v2_getNextId('Intelligence ID');
+}
+
+function v2_getNextOutreachAssetId() {
+  return v2_getNextId('Outreach Asset ID');
+}
+
+function v2_getNextCampaignId() {
+  return v2_getNextId('Campaign ID');
+}
+
+function v2_getNextOutreachId() {
+  return v2_getNextId('Outreach ID');
+}
+
+function v2_getNextMeetingId() {
+  return v2_getNextId('Meeting ID');
+}
+
+function v2_getNextLogId() {
+  return v2_getNextId('Log ID');
+}
+
+
+/**
+ * Test function.
+ * Run this manually to confirm the ID service works.
+ *
+ * IMPORTANT:
+ * This will increment the counter.
+ */
+function v2_testIdService() {
+  const testIds = [];
+
+  testIds.push(['Prospect ID', v2_getNextProspectId()]);
+  testIds.push(['Intelligence ID', v2_getNextIntelligenceId()]);
+  testIds.push(['Outreach Asset ID', v2_getNextOutreachAssetId()]);
+  testIds.push(['Campaign ID', v2_getNextCampaignId()]);
+  testIds.push(['Outreach ID', v2_getNextOutreachId()]);
+  testIds.push(['Meeting ID', v2_getNextMeetingId()]);
+  testIds.push(['Log ID', v2_getNextLogId()]);
+
+  let message = 'ID Service Test Complete\n\n';
+
+  testIds.forEach(row => {
+    message += `${row[0]}: ${row[1]}\n`;
+  });
+
+  SpreadsheetApp.getUi().alert(message);
+}
