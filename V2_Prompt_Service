@@ -1,0 +1,322 @@
+/***************************************
+ * 100 Prospect AI Platform
+ * V2_Base_Service.gs
+ * Shared spreadsheet helper functions
+ ***************************************/
+
+/**
+ * Gets the active spreadsheet.
+ */
+function v2_getSpreadsheet() {
+  return SpreadsheetApp.getActiveSpreadsheet();
+}
+
+
+/**
+ * Gets a sheet by name.
+ * Throws a clear error if missing.
+ */
+function v2_getSheet(sheetName) {
+  const ss = v2_getSpreadsheet();
+  const sheet = ss.getSheetByName(sheetName);
+
+  if (!sheet) {
+    throw new Error(`Sheet not found: ${sheetName}`);
+  }
+
+  return sheet;
+}
+
+
+/**
+ * Gets a sheet using a V2_CONFIG.SHEETS key.
+ * Example: v2_getConfiguredSheet('PROSPECT_QUEUE')
+ */
+function v2_getConfiguredSheet(sheetKey) {
+  if (!V2_CONFIG.SHEETS[sheetKey]) {
+    throw new Error(`Unknown sheet key: ${sheetKey}`);
+  }
+
+  return v2_getSheet(V2_CONFIG.SHEETS[sheetKey]);
+}
+
+
+/**
+ * Returns the header row as clean strings.
+ */
+function v2_getHeaders(sheet) {
+  const lastCol = sheet.getLastColumn();
+
+  if (lastCol === 0) {
+    return [];
+  }
+
+  return sheet
+    .getRange(1, 1, 1, lastCol)
+    .getValues()[0]
+    .map(header => String(header).trim());
+}
+
+
+/**
+ * Returns zero-based column index by header name.
+ */
+function v2_getHeaderIndex(sheet, headerName) {
+  const headers = v2_getHeaders(sheet);
+  return headers.indexOf(headerName);
+}
+
+
+/**
+ * Returns one-based column number by header name.
+ * Throws if missing.
+ */
+function v2_getColumnNumber(sheet, headerName) {
+  const index = v2_getHeaderIndex(sheet, headerName);
+
+  if (index === -1) {
+    throw new Error(`Header not found: ${headerName} on sheet ${sheet.getName()}`);
+  }
+
+  return index + 1;
+}
+
+
+/**
+ * Returns an object map of header name → one-based column number.
+ */
+function v2_getColumnMap(sheet) {
+  const headers = v2_getHeaders(sheet);
+  const map = {};
+
+  headers.forEach((header, index) => {
+    if (header) {
+      map[header] = index + 1;
+    }
+  });
+
+  return map;
+}
+
+
+/**
+ * Converts a sheet row into an object using headers.
+ * Example:
+ * {
+ *   "Prospect ID": "R29-000001",
+ *   "Company Name": "ABC Ltd"
+ * }
+ */
+function v2_getRowAsObject(sheet, rowNumber) {
+  const headers = v2_getHeaders(sheet);
+  const lastCol = headers.length;
+
+  if (rowNumber < 1) {
+    throw new Error('Row number must be 1 or greater.');
+  }
+
+  if (lastCol === 0) {
+    throw new Error(`Sheet has no headers: ${sheet.getName()}`);
+  }
+
+  const values = sheet.getRange(rowNumber, 1, 1, lastCol).getValues()[0];
+  const obj = {};
+
+  headers.forEach((header, index) => {
+    if (header) {
+      obj[header] = values[index];
+    }
+  });
+
+  return obj;
+}
+
+
+/**
+ * Converts all data rows into objects.
+ */
+function v2_getDataAsObjects(sheet) {
+  const headers = v2_getHeaders(sheet);
+  const lastRow = sheet.getLastRow();
+  const lastCol = headers.length;
+
+  if (lastRow < V2_CONFIG.FIRST_DATA_ROW || lastCol === 0) {
+    return [];
+  }
+
+  const values = sheet
+    .getRange(V2_CONFIG.FIRST_DATA_ROW, 1, lastRow - V2_CONFIG.FIRST_DATA_ROW + 1, lastCol)
+    .getValues();
+
+  return values.map((row, rowIndex) => {
+    const obj = {
+      _rowNumber: V2_CONFIG.FIRST_DATA_ROW + rowIndex
+    };
+
+    headers.forEach((header, index) => {
+      if (header) {
+        obj[header] = row[index];
+      }
+    });
+
+    return obj;
+  });
+}
+
+
+/**
+ * Appends an object as a row based on matching headers.
+ * Missing values are written as blank.
+ */
+function v2_appendObjectRow(sheet, objectData) {
+  const headers = v2_getHeaders(sheet);
+
+  if (headers.length === 0) {
+    throw new Error(`Cannot append row. Sheet has no headers: ${sheet.getName()}`);
+  }
+
+  const row = headers.map(header => {
+    return Object.prototype.hasOwnProperty.call(objectData, header)
+      ? objectData[header]
+      : '';
+  });
+
+  const firstHeader = headers[0];
+  const nextRow = v2_getNextEmptyRowByColumn(sheet, firstHeader);
+
+  sheet.getRange(nextRow, 1, 1, row.length).setValues([row]);
+
+  return nextRow;
+}
+
+/**
+ * Updates selected fields on a row using header names.
+ */
+function v2_updateRowFields(sheet, rowNumber, fieldValues) {
+  if (rowNumber < V2_CONFIG.FIRST_DATA_ROW) {
+    throw new Error(`Cannot update header row on sheet: ${sheet.getName()}`);
+  }
+
+  Object.keys(fieldValues).forEach(fieldName => {
+    const colNumber = v2_getColumnNumber(sheet, fieldName);
+    sheet.getRange(rowNumber, colNumber).setValue(fieldValues[fieldName]);
+  });
+}
+
+
+/**
+ * Finds the first row number where a field equals a value.
+ * Returns null if not found.
+ */
+function v2_findRowByField(sheet, fieldName, valueToFind) {
+  const data = v2_getDataAsObjects(sheet);
+
+  const match = data.find(row => {
+    return String(row[fieldName]).trim() === String(valueToFind).trim();
+  });
+
+  return match ? match._rowNumber : null;
+}
+
+
+/**
+ * Finds all row objects where a field equals a value.
+ */
+function v2_findRowsByField(sheet, fieldName, valueToFind) {
+  const data = v2_getDataAsObjects(sheet);
+
+  return data.filter(row => {
+    return String(row[fieldName]).trim() === String(valueToFind).trim();
+  });
+}
+
+
+/**
+ * Simple blank check.
+ */
+function v2_isBlank(value) {
+  return value === null || value === undefined || String(value).trim() === '';
+}
+
+
+/**
+ * Normalises text for comparisons.
+ */
+function v2_normaliseText(value) {
+  return String(value || '').trim().toLowerCase();
+}
+
+
+/**
+ * Converts truthy sheet values to boolean.
+ */
+function v2_toBoolean(value) {
+  if (value === true) return true;
+  if (value === false) return false;
+
+  const normalised = v2_normaliseText(value);
+
+  return ['true', 'yes', 'y', '1', 'active', 'approved'].includes(normalised);
+}
+
+
+/**
+ * Returns current user email if available.
+ */
+function v2_getCurrentUserEmail() {
+  try {
+    return Session.getActiveUser().getEmail() || '';
+  } catch (error) {
+    return '';
+  }
+}
+
+
+/**
+ * Test function.
+ */
+function v2_testBaseService() {
+  const sheet = v2_getConfiguredSheet('SYSTEM_COUNTERS');
+  const headers = v2_getHeaders(sheet);
+  const rows = v2_getDataAsObjects(sheet);
+
+  const message =
+    `Base Service Test Complete\n\n` +
+    `Sheet: ${sheet.getName()}\n` +
+    `Headers Found: ${headers.length}\n` +
+    `Data Rows Found: ${rows.length}\n\n` +
+    `First Counter Type: ${rows.length ? rows[0]['Counter Type'] : 'None'}`;
+
+  v2_logInfo(
+    '',
+    'Base Service',
+    'v2_testBaseService',
+    'TEST',
+    'Base service test completed successfully.',
+    '',
+    message
+  );
+
+  SpreadsheetApp.getUi().alert(message);
+}
+function v2_getNextEmptyRowByColumn(sheet, headerName) {
+  const colNumber = v2_getColumnNumber(sheet, headerName);
+  const maxRows = sheet.getMaxRows();
+
+  const values = sheet
+    .getRange(
+      V2_CONFIG.FIRST_DATA_ROW,
+      colNumber,
+      maxRows - V2_CONFIG.FIRST_DATA_ROW + 1,
+      1
+    )
+    .getValues();
+
+  for (let i = 0; i < values.length; i++) {
+    if (v2_isBlank(values[i][0])) {
+      return V2_CONFIG.FIRST_DATA_ROW + i;
+    }
+  }
+
+  return sheet.getLastRow() + 1;
+}
