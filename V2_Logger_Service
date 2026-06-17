@@ -1,0 +1,180 @@
+/***************************************
+ * 100 Prospect AI Platform
+ * V2_Logger_Service.gs
+ * Central logging service
+ ***************************************/
+
+/**
+ * Writes an event to the AI Logs sheet
+ * and also writes a readable message to the Apps Script execution log.
+ */
+function v2_logEvent(event) {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sheet = ss.getSheetByName(V2_CONFIG.SHEETS.AI_LOGS);
+
+  if (!sheet) {
+    throw new Error(`Missing sheet: ${V2_CONFIG.SHEETS.AI_LOGS}`);
+  }
+
+  const logId = v2_getNextLogId();
+
+  const logEvent = {
+    logId: logId,
+    timestamp: new Date(),
+    prospectId: event.prospectId || '',
+    module: event.module || '',
+    functionName: event.functionName || '',
+    eventType: event.eventType || '',
+    status: event.status || '',
+    errorType: event.errorType || '',
+    message: event.message || '',
+    rawRequest: event.rawRequest || '',
+    rawResponse: event.rawResponse || ''
+  };
+
+  const row = [
+    logEvent.logId,
+    logEvent.timestamp,
+    logEvent.prospectId,
+    logEvent.module,
+    logEvent.functionName,
+    logEvent.eventType,
+    logEvent.status,
+    logEvent.errorType,
+    logEvent.message,
+    logEvent.rawRequest,
+    logEvent.rawResponse,
+    false,
+    '',
+    ''
+  ];
+
+  sheet.appendRow(row);
+
+  v2_writeExecutionLog_(logEvent);
+
+  return logId;
+}
+
+
+/**
+ * Writes a readable log line to Apps Script Executions.
+ */
+function v2_writeExecutionLog_(logEvent) {
+  const parts = [];
+
+  parts.push(`[${logEvent.status || 'INFO'}]`);
+
+  if (logEvent.module) {
+    parts.push(`[${logEvent.module}]`);
+  }
+
+  if (logEvent.functionName) {
+    parts.push(`[${logEvent.functionName}]`);
+  }
+
+  if (logEvent.prospectId) {
+    parts.push(`[${logEvent.prospectId}]`);
+  }
+
+  if (logEvent.eventType) {
+    parts.push(`[${logEvent.eventType}]`);
+  }
+
+  parts.push(`- ${logEvent.message || 'No message provided'}`);
+
+  Logger.log(parts.join(' '));
+}
+
+
+/**
+ * Convenience wrapper for successful events.
+ */
+function v2_logInfo(prospectId, module, functionName, eventType, message, rawRequest, rawResponse) {
+  return v2_logEvent({
+    prospectId: prospectId || '',
+    module: module || '',
+    functionName: functionName || '',
+    eventType: eventType || 'INFO',
+    status: 'OK',
+    errorType: '',
+    message: message || '',
+    rawRequest: rawRequest || '',
+    rawResponse: rawResponse || ''
+  });
+}
+
+
+/**
+ * Convenience wrapper for warnings.
+ */
+function v2_logWarning(prospectId, module, functionName, eventType, message, rawRequest, rawResponse) {
+  return v2_logEvent({
+    prospectId: prospectId || '',
+    module: module || '',
+    functionName: functionName || '',
+    eventType: eventType || 'WARNING',
+    status: 'WARNING',
+    errorType: '',
+    message: message || '',
+    rawRequest: rawRequest || '',
+    rawResponse: rawResponse || ''
+  });
+}
+
+
+/**
+ * Convenience wrapper for errors.
+ */
+function v2_logError(prospectId, module, functionName, errorType, message, rawRequest, rawResponse) {
+  return v2_logEvent({
+    prospectId: prospectId || '',
+    module: module || '',
+    functionName: functionName || '',
+    eventType: 'ERROR',
+    status: 'ERROR',
+    errorType: errorType || 'General Error',
+    message: message || '',
+    rawRequest: rawRequest || '',
+    rawResponse: rawResponse || ''
+  });
+}
+
+
+/**
+ * Logs an actual caught exception.
+ */
+function v2_logException(prospectId, module, functionName, error, rawRequest, rawResponse) {
+  const message = error && error.message ? error.message : String(error);
+
+  return v2_logEvent({
+    prospectId: prospectId || '',
+    module: module || '',
+    functionName: functionName || '',
+    eventType: 'EXCEPTION',
+    status: 'ERROR',
+    errorType: error && error.name ? error.name : 'Exception',
+    message: message,
+    rawRequest: rawRequest || '',
+    rawResponse: rawResponse || ''
+  });
+}
+
+
+/**
+ * Test function.
+ * Run manually to confirm logging works.
+ */
+function v2_testLoggerService() {
+  const logId = v2_logInfo(
+    '',
+    'Logger Service',
+    'v2_testLoggerService',
+    'TEST',
+    'Logger service test completed successfully and wrote to Apps Script execution log.',
+    '',
+    ''
+  );
+
+  SpreadsheetApp.getUi().alert(`Logger Service Test Complete\n\nLog ID: ${logId}`);
+}
