@@ -1,0 +1,596 @@
+/***************************************
+ * 100 Prospect AI Platform
+ * V2_Initialise_Service.gs
+ * Platform Health Service
+ ***************************************/
+
+function v2_initialiseSystem() {
+  const results = v2_runPlatformHealthCheck_();
+  const message = v2_buildPlatformHealthReport_(results);
+
+  const errorCount = results.filter(r => r.status === 'ERROR').length;
+  const warningCount = results.filter(r => r.status === 'WARNING').length;
+
+  v2_writePlatformHealthLog_(results);
+
+  SpreadsheetApp.getUi().alert(
+    errorCount > 0
+      ? 'V2 Platform Health: Action Required'
+      : warningCount > 0
+        ? 'V2 Platform Health: Ready With Warnings'
+        : 'V2 Platform Health: Ready',
+    message,
+    SpreadsheetApp.getUi().ButtonSet.OK
+  );
+}
+
+function v2_runPlatformHealthCheck_() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  let results = [];
+
+  results = results.concat(v2_checkRequiredSheets_(ss));
+  results = results.concat(v2_checkRequiredHeaders_(ss));
+  results = results.concat(v2_checkSystemCounters_(ss));
+  results = results.concat(v2_checkSettingsConfiguration_(ss));
+  results = results.concat(v2_checkPromptLibrary_(ss));
+  results = results.concat(v2_checkScriptProperties_());
+  results = results.concat(v2_checkServiceStatus_());
+
+  return results;
+}
+
+/***************************************
+ * 1. Required Sheet Checks
+ ***************************************/
+
+function v2_checkRequiredSheets_(ss) {
+  const results = [];
+  const requiredSheets = Object.values(V2_CONFIG.SHEETS);
+
+  requiredSheets.forEach(sheetName => {
+    const sheet = ss.getSheetByName(sheetName);
+
+    results.push({
+      area: 'Structure',
+      item: `Sheet: ${sheetName}`,
+      status: sheet ? 'OK' : 'ERROR',
+      message: sheet ? 'Sheet found' : 'Missing required sheet'
+    });
+  });
+
+  return results;
+}
+
+/***************************************
+ * 2. Required Header Checks
+ ***************************************/
+
+function v2_checkRequiredHeaders_(ss) {
+  const results = [];
+
+  const requiredHeaders = {
+    [V2_CONFIG.SHEETS.PROSPECT_QUEUE]: [
+      'Prospect ID', 'Date Added', 'Source', 'Company Name',
+      'Email Address', 'Offer Type', 'Ready For AI', 'Process Status'
+    ],
+
+    [V2_CONFIG.SHEETS.AI_INTELLIGENCE]: [
+      'Intelligence ID', 'Prospect ID', 'Research Date', 'Company Name',
+      'Prospect Score', 'Lead Fit', 'Human Review Status'
+    ],
+
+    [V2_CONFIG.SHEETS.AI_OUTREACH]: [
+      'Outreach Asset ID', 'Prospect ID', 'Campaign ID', 'Company Name',
+      'Email Address', 'Approval Status', 'CRM Status'
+    ],
+
+    [V2_CONFIG.SHEETS.OUTREACH_TRACKER]: [
+      'Outreach ID', 'Prospect ID', 'Campaign ID', 'Company Name',
+      'Email Address', 'Campaign Status'
+    ],
+
+    [V2_CONFIG.SHEETS.MEETINGS_BOOKED]: [
+      'Meeting ID', 'Prospect ID', 'Campaign ID', 'Company Name',
+      'Contact Name', 'Meeting Status'
+    ],
+
+    [V2_CONFIG.SHEETS.PROMPT_LIBRARY]: [
+      'Prompt ID', 'Prompt Name', 'Prompt Category', 'Offer Type',
+      'Workflow Stage', 'Prompt Text', 'Active Status', 'Prompt Status', 'Used In'
+    ],
+
+    [V2_CONFIG.SHEETS.SETTINGS]: [
+      'Category', 'Setting Key', 'Setting Value', 'Active Status', 'Used In'
+    ],
+
+    [V2_CONFIG.SHEETS.SYSTEM_COUNTERS]: [
+      'Counter Type', 'Prefix', 'Last Number Used', 'Last ID Created', 'Last Updated'
+    ],
+
+    [V2_CONFIG.SHEETS.AI_LOGS]: [
+      'Log ID', 'Timestamp', 'Prospect ID', 'Module', 'Function Name',
+      'Event Type', 'Status', 'Message'
+    ]
+  };
+
+  Object.keys(requiredHeaders).forEach(sheetName => {
+    const sheet = ss.getSheetByName(sheetName);
+
+    if (!sheet) {
+      results.push({
+        area: 'Headers',
+        item: sheetName,
+        status: 'ERROR',
+        message: 'Cannot check headers because sheet is missing'
+      });
+      return;
+    }
+
+    const lastCol = sheet.getLastColumn();
+
+    if (lastCol === 0) {
+      results.push({
+        area: 'Headers',
+        item: sheetName,
+        status: 'ERROR',
+        message: 'Sheet has no headers'
+      });
+      return;
+    }
+
+    const headerRow = sheet
+      .getRange(1, 1, 1, lastCol)
+      .getValues()[0]
+      .map(h => String(h).trim());
+
+    requiredHeaders[sheetName].forEach(requiredHeader => {
+      results.push({
+        area: 'Headers',
+        item: `${sheetName} → ${requiredHeader}`,
+        status: headerRow.includes(requiredHeader) ? 'OK' : 'ERROR',
+        message: headerRow.includes(requiredHeader)
+          ? 'Header found'
+          : 'Missing required header'
+      });
+    });
+  });
+
+  return results;
+}
+
+/***************************************
+ * 3. System Counter Checks
+ ***************************************/
+
+function v2_checkSystemCounters_(ss) {
+  const results = [];
+  const sheet = ss.getSheetByName(V2_CONFIG.SHEETS.SYSTEM_COUNTERS);
+
+  if (!sheet) {
+    return [{
+      area: 'System Counters',
+      item: 'System Counters',
+      status: 'ERROR',
+      message: 'System Counters sheet missing'
+    }];
+  }
+
+  const requiredCounters = [
+    'Prospect ID',
+    'Intelligence ID',
+    'Outreach Asset ID',
+    'Campaign ID',
+    'Outreach ID',
+    'Meeting ID',
+    'Log ID'
+  ];
+
+  const values = sheet.getDataRange().getValues();
+  const headers = values[0].map(h => String(h).trim());
+  const counterTypeIndex = headers.indexOf('Counter Type');
+
+  if (counterTypeIndex === -1) {
+    return [{
+      area: 'System Counters',
+      item: 'Counter Type',
+      status: 'ERROR',
+      message: 'Counter Type header missing'
+    }];
+  }
+
+  const existingCounters = values
+    .slice(1)
+    .map(row => String(row[counterTypeIndex]).trim())
+    .filter(Boolean);
+
+  requiredCounters.forEach(counter => {
+    results.push({
+      area: 'System Counters',
+      item: counter,
+      status: existingCounters.includes(counter) ? 'OK' : 'ERROR',
+      message: existingCounters.includes(counter)
+        ? 'Counter found'
+        : 'Missing required counter'
+    });
+  });
+
+  return results;
+}
+
+/***************************************
+ * 4. Settings Configuration Checks
+ ***************************************/
+
+function v2_checkSettingsConfiguration_(ss) {
+  const results = [];
+  const sheet = ss.getSheetByName(V2_CONFIG.SHEETS.SETTINGS);
+
+  if (!sheet) {
+    return [{
+      area: 'Configuration',
+      item: 'Settings',
+      status: 'ERROR',
+      message: 'Settings sheet missing'
+    }];
+  }
+
+  const requiredCategories = [
+    'Offer Type',
+    'Lead Fit',
+    'Human Review Status',
+    'Outreach Approval Status',
+    'CRM Status',
+    'Campaign Status',
+    'Meeting Status',
+    'Meeting Priority',
+    'Proposal Status',
+    'Opportunity Outcome',
+    'Prompt Status',
+    'Active Status',
+    'Used In'
+  ];
+
+  const values = sheet.getDataRange().getValues();
+  const headers = values[0].map(h => String(h).trim());
+
+  const categoryIndex = headers.indexOf('Category');
+  const activeIndex = headers.indexOf('Active Status');
+
+  if (categoryIndex === -1) {
+    return [{
+      area: 'Configuration',
+      item: 'Settings Category',
+      status: 'ERROR',
+      message: 'Category header missing'
+    }];
+  }
+
+  const activeCategories = values
+    .slice(1)
+    .filter(row => {
+      if (activeIndex === -1) return true;
+      const activeValue = String(row[activeIndex]).toUpperCase().trim();
+      return activeValue === 'TRUE' || activeValue === 'ACTIVE' || activeValue === 'YES';
+    })
+    .map(row => String(row[categoryIndex]).trim())
+    .filter(Boolean);
+
+  requiredCategories.forEach(category => {
+    results.push({
+      area: 'Configuration',
+      item: category,
+      status: activeCategories.includes(category) ? 'OK' : 'WARNING',
+      message: activeCategories.includes(category)
+        ? 'Configured'
+        : 'Missing or inactive setting category'
+    });
+  });
+
+  return results;
+}
+
+/***************************************
+ * 5. Prompt Library Checks
+ ***************************************/
+
+function v2_checkPromptLibrary_(ss) {
+  const results = [];
+  const sheet = ss.getSheetByName(V2_CONFIG.SHEETS.PROMPT_LIBRARY);
+
+  if (!sheet) {
+    return [{
+      area: 'Prompt Library',
+      item: 'Prompt Library',
+      status: 'ERROR',
+      message: 'Prompt Library sheet missing'
+    }];
+  }
+
+  const values = sheet.getDataRange().getValues();
+
+  if (values.length < 2) {
+    return [{
+      area: 'Prompt Library',
+      item: 'Prompt Library',
+      status: 'WARNING',
+      message: 'No prompts currently loaded'
+    }];
+  }
+
+  const headers = values[0].map(h => String(h).trim());
+
+  const promptIdIndex = headers.indexOf('Prompt ID');
+  const activeStatusIndex = headers.indexOf('Active Status');
+  const promptStatusIndex = headers.indexOf('Prompt Status');
+  const usedInIndex = headers.indexOf('Used In');
+
+  if (promptIdIndex === -1) {
+    return [{
+      area: 'Prompt Library',
+      item: 'Prompt ID',
+      status: 'ERROR',
+      message: 'Prompt ID header missing'
+    }];
+  }
+
+  const activePrompts = values
+    .slice(1)
+    .filter(row => {
+      const promptId = String(row[promptIdIndex]).trim();
+      const activeStatus = activeStatusIndex >= 0 ? String(row[activeStatusIndex]).trim() : '';
+      const promptStatus = promptStatusIndex >= 0 ? String(row[promptStatusIndex]).trim() : '';
+      const usedIn = usedInIndex >= 0 ? String(row[usedInIndex]).trim() : '';
+
+      return (
+        promptId &&
+        activeStatus.toLowerCase() === 'active' &&
+        promptStatus.toLowerCase() === 'approved' &&
+        ['v2', 'both'].includes(usedIn.toLowerCase())
+      );
+    });
+
+  results.push({
+    area: 'Prompt Library',
+    item: 'Active V2 Prompts',
+    status: activePrompts.length > 0 ? 'OK' : 'WARNING',
+    message: activePrompts.length > 0
+      ? `${activePrompts.length} active V2 prompt(s) found`
+      : 'No active approved V2 prompts found'
+  });
+
+  return results;
+}
+
+/***************************************
+ * 6. Script Property Checks
+ ***************************************/
+
+function v2_checkScriptProperties_() {
+  const results = [];
+  const props = PropertiesService.getScriptProperties();
+
+  const requiredProperties = [
+    'OPENAI_API_KEY',
+    'FLUENTCRM_BASE_URL',
+    'FLUENTCRM_USERNAME',
+    'FLUENTCRM_APP_PASSWORD'
+  ];
+
+  requiredProperties.forEach(key => {
+    const value = props.getProperty(key);
+
+    results.push({
+      area: 'External Connections',
+      item: key,
+      status: value ? 'OK' : 'WARNING',
+      message: value ? 'Property set' : 'Property not currently set'
+    });
+  });
+
+  return results;
+}
+
+/***************************************
+ * 7. Service Status Checks
+ ***************************************/
+
+function v2_checkServiceStatus_() {
+  const services = [
+    { name: 'Config Service', functionName: null, complete: true },
+    { name: 'Initialise Service', functionName: 'v2_initialiseSystem', complete: true },
+    { name: 'ID Service', functionName: 'v2_getNextId', complete: false },
+    { name: 'Settings Service', functionName: 'v2_getSettingsByCategory', complete: false },
+    { name: 'Logger Service', functionName: 'v2_logEvent', complete: false },
+    { name: 'OpenAI Service', functionName: 'v2_callOpenAI', complete: false },
+    { name: 'Research Service', functionName: 'v2_processReadyProspects', complete: false },
+    { name: 'Outreach Service', functionName: 'v2_generateOutreachAssets', complete: false },
+    { name: 'FluentCRM Service', functionName: 'v2_pushApprovedToFluentCRM', complete: false },
+    { name: 'Dashboard Service', functionName: 'v2_refreshDashboard', complete: false }
+  ];
+
+  return services.map(service => {
+    if (service.complete) {
+      return {
+        area: 'Services',
+        item: service.name,
+        status: 'OK',
+        message: 'Service available'
+      };
+    }
+
+    return {
+      area: 'Services',
+      item: service.name,
+      status: 'INFO',
+      message: 'Not built yet'
+    };
+  });
+}
+
+/***************************************
+ * 8. Report Builder
+ ***************************************/
+
+function v2_buildPlatformHealthReport_(results) {
+  const okCount = results.filter(r => r.status === 'OK').length;
+  const infoCount = results.filter(r => r.status === 'INFO').length;
+  const warningCount = results.filter(r => r.status === 'WARNING').length;
+  const errorCount = results.filter(r => r.status === 'ERROR').length;
+
+  let overallStatus = 'READY';
+
+  if (errorCount > 0) {
+    overallStatus = 'ACTION REQUIRED';
+  } else if (warningCount > 0) {
+    overallStatus = 'READY FOR DEVELOPMENT';
+  }
+
+  let report = '';
+
+  report += `100 Prospect AI Platform\n`;
+  report += `Version: 2.0\n\n`;
+
+  report += `Platform Health\n\n`;
+  report += `System Status: ${overallStatus}\n\n`;
+
+  report += `Summary\n`;
+  report += `OK: ${okCount}\n`;
+  report += `Info: ${infoCount}\n`;
+  report += `Warnings: ${warningCount}\n`;
+  report += `Errors: ${errorCount}\n\n`;
+
+  report += `Core Platform\n`;
+  report += `${v2_areaHasErrors_(results, 'Structure') ? '✗' : '✓'} Structure\n`;
+  report += `${v2_areaHasErrors_(results, 'Headers') ? '✗' : '✓'} Headers\n`;
+  report += `${v2_areaHasErrors_(results, 'System Counters') ? '✗' : '✓'} System Counters\n`;
+  report += `${v2_areaHasWarningsOrErrors_(results, 'Configuration') ? '⚠' : '✓'} Configuration\n`;
+  report += `${v2_areaHasWarningsOrErrors_(results, 'Prompt Library') ? '⚠' : '✓'} Prompt Library\n`;
+  report += `${v2_areaHasWarningsOrErrors_(results, 'External Connections') ? '⚠' : '✓'} External Connections\n\n`;
+
+  report += `Services\n`;
+  results
+    .filter(r => r.area === 'Services')
+    .forEach(r => {
+      const icon = r.status === 'OK' ? '✓' : '□';
+      report += `${icon} ${r.item} — ${r.message}\n`;
+    });
+
+  report += `\n`;
+
+  if (errorCount > 0) {
+    report += `Errors To Fix\n`;
+    results
+      .filter(r => r.status === 'ERROR')
+      .forEach(r => {
+        report += `- ${r.area}: ${r.item} — ${r.message}\n`;
+      });
+    report += `\n`;
+  }
+
+  if (warningCount > 0) {
+    report += `Warnings\n`;
+    results
+      .filter(r => r.status === 'WARNING')
+      .forEach(r => {
+        report += `- ${r.area}: ${r.item} — ${r.message}\n`;
+      });
+    report += `\n`;
+  }
+
+  report += `Overall Status\n`;
+
+  if (errorCount > 0) {
+    report += `FIX REQUIRED BEFORE BUILD CONTINUES`;
+  } else if (warningCount > 0) {
+    report += `READY TO BUILD\n\nWarnings are expected until prompts, OpenAI and FluentCRM are connected.`;
+  } else {
+    report += `READY TO RUN`;
+  }
+
+  return report;
+}
+
+function v2_areaHasErrors_(results, area) {
+  return results.some(r => r.area === area && r.status === 'ERROR');
+}
+
+function v2_areaHasWarningsOrErrors_(results, area) {
+  return results.some(
+    r => r.area === area && ['WARNING', 'ERROR'].includes(r.status)
+  );
+}
+
+/***************************************
+ * 9. Platform Health Log
+ ***************************************/
+
+function v2_writePlatformHealthLog_(results) {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  let sheet = ss.getSheetByName('Platform Health');
+
+  if (!sheet) {
+    sheet = ss.insertSheet('Platform Health');
+  }
+
+  sheet.clear();
+
+  const summaryHeaders = [
+    'Run Date',
+    'Platform Version',
+    'Overall Status',
+    'OK',
+    'Info',
+    'Warnings',
+    'Errors'
+  ];
+
+  const okCount = results.filter(r => r.status === 'OK').length;
+  const infoCount = results.filter(r => r.status === 'INFO').length;
+  const warningCount = results.filter(r => r.status === 'WARNING').length;
+  const errorCount = results.filter(r => r.status === 'ERROR').length;
+
+  let overallStatus = 'READY';
+
+  if (errorCount > 0) {
+    overallStatus = 'ACTION REQUIRED';
+  } else if (warningCount > 0) {
+    overallStatus = 'READY FOR DEVELOPMENT';
+  }
+
+  sheet.getRange(1, 1, 1, summaryHeaders.length).setValues([summaryHeaders]);
+
+  sheet.getRange(2, 1, 1, summaryHeaders.length).setValues([[
+    new Date(),
+    '2.0',
+    overallStatus,
+    okCount,
+    infoCount,
+    warningCount,
+    errorCount
+  ]]);
+
+  const detailStartRow = 4;
+
+  const detailHeaders = [
+    'Area',
+    'Item',
+    'Status',
+    'Message'
+  ];
+
+  sheet.getRange(detailStartRow, 1, 1, detailHeaders.length).setValues([detailHeaders]);
+
+  const detailRows = results.map(r => [
+    r.area,
+    r.item,
+    r.status,
+    r.message
+  ]);
+
+  if (detailRows.length > 0) {
+    sheet.getRange(detailStartRow + 1, 1, detailRows.length, detailHeaders.length)
+      .setValues(detailRows);
+  }
+
+  sheet.autoResizeColumns(1, 7);
+}
