@@ -1,0 +1,36 @@
+/***************************************
+ * 100 Prospect AI Platform
+ * V2_Workflow_Service.gs
+ * UI-safe workflow wrappers
+ ***************************************/
+
+function v2_runAIResearch() {
+  try {
+    const result = v2_processReadyProspects();
+
+    SpreadsheetApp.getUi().alert(
+      `AI Research Complete\n\n` +
+      `Processed: ${result.processed}\n` +
+      `Failed: ${result.failed}\n\n` +
+      `${result.message || ''}`
+    );
+
+    return result;
+
+  } catch (error) {
+    v2_logException(
+      '',
+      'Workflow Service',
+      'v2_runAIResearch',
+      error,
+      '',
+      ''
+    );
+
+    SpreadsheetApp.getUi().alert(
+      `AI Research Failed\n\n${error.message}`
+    );
+
+    throw error;
+  }
+}
