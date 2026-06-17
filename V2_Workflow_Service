@@ -5,15 +5,28 @@
  ***************************************/
 
 function v2_runAIResearch() {
-  try {
-    const result = v2_processReadyProspects();
+  let result;
 
-    SpreadsheetApp.getUi().alert(
+  try {
+    result = v2_processReadyProspects();
+
+    const message =
       `AI Research Complete\n\n` +
       `Processed: ${result.processed}\n` +
       `Failed: ${result.failed}\n\n` +
-      `${result.message || ''}`
+      `${result.message || ''}`;
+
+    v2_logInfo(
+      '',
+      'Workflow Service',
+      'v2_runAIResearch',
+      'WORKFLOW_COMPLETE',
+      message,
+      '',
+      ''
     );
+
+    v2_safeAlert_(message);
 
     return result;
 
@@ -27,10 +40,21 @@ function v2_runAIResearch() {
       ''
     );
 
-    SpreadsheetApp.getUi().alert(
-      `AI Research Failed\n\n${error.message}`
-    );
+    v2_safeAlert_(`AI Research Failed\n\n${error.message}`);
 
-    throw error;
+    return {
+      processed: result ? result.processed : 0,
+      failed: result ? result.failed : 1,
+      error: error.message
+    };
+  }
+}
+
+
+function v2_safeAlert_(message) {
+  try {
+    SpreadsheetApp.getUi().alert(message);
+  } catch (error) {
+    Logger.log(message);
   }
 }
