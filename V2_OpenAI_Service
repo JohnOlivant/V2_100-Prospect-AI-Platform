@@ -1,0 +1,257 @@
+/***************************************
+ * 100 Prospect AI Platform
+ * V2_OpenAI_Service.gs
+ * OpenAI connection layer
+ ***************************************/
+
+/**
+ * Calls OpenAI using the Responses API.
+ *
+ * OpenAI currently recommends the Responses API for direct model requests,
+ * including text and JSON-style outputs.
+ */
+function v2_callOpenAI(options) {
+  options = options || {};
+
+  const apiKey = v2_getOpenAIApiKey_();
+
+  const model = options.model || 'gpt-4.1-mini';
+  const input = options.input || options.prompt || '';
+  const temperature = options.temperature !== undefined ? Number(options.temperature) : 0.3;
+  const maxOutputTokens = options.maxTokens || options.max_output_tokens || 1200;
+
+  if (v2_isBlank(input)) {
+    throw new Error('OpenAI input is required.');
+  }
+
+  const url = 'https://api.openai.com/v1/responses';
+
+  const payload = {
+    model: model,
+    input: input,
+    temperature: temperature,
+    max_output_tokens: maxOutputTokens
+  };
+
+  const requestOptions = {
+    method: 'post',
+    contentType: 'application/json',
+    headers: {
+      Authorization: `Bearer ${apiKey}`
+    },
+    payload: JSON.stringify(payload),
+    muteHttpExceptions: true
+  };
+
+  v2_logInfo(
+    '',
+    'OpenAI Service',
+    'v2_callOpenAI',
+    'REQUEST_SENT',
+    `Sending request to OpenAI using model ${model}.`,
+    JSON.stringify({
+      model: model,
+      temperature: temperature,
+      max_output_tokens: maxOutputTokens
+    }),
+    ''
+  );
+
+  const response = UrlFetchApp.fetch(url, requestOptions);
+  const statusCode = response.getResponseCode();
+  const responseText = response.getContentText();
+
+  if (statusCode < 200 || statusCode >= 300) {
+    v2_logError(
+      '',
+      'OpenAI Service',
+      'v2_callOpenAI',
+      `HTTP ${statusCode}`,
+      'OpenAI API request failed.',
+      JSON.stringify(payload),
+      responseText
+    );
+
+    throw new Error(`OpenAI API request failed with status ${statusCode}: ${responseText}`);
+  }
+
+  const json = JSON.parse(responseText);
+  const outputText = v2_extractOpenAIText_(json);
+
+  v2_logInfo(
+    '',
+    'OpenAI Service',
+    'v2_callOpenAI',
+    'RESPONSE_RECEIVED',
+    `OpenAI response received using model ${model}.`,
+    '',
+    outputText
+  );
+
+  return {
+    statusCode: statusCode,
+    model: model,
+    raw: json,
+    text: outputText
+  };
+}
+
+
+/**
+ * Calls OpenAI and expects JSON back.
+ * If the model returns text wrapped around JSON, this attempts to extract it.
+ */
+function v2_callOpenAIJson(options) {
+  options = options || {};
+
+  const response = v2_callOpenAI(options);
+  const text = response.text;
+
+  try {
+    return {
+      statusCode: response.statusCode,
+      model: response.model,
+      raw: response.raw,
+      text: text,
+      json: JSON.parse(text)
+    };
+  } catch (firstError) {
+    const extracted = v2_extractJsonFromText_(text);
+
+    if (!extracted) {
+      v2_logError(
+        '',
+        'OpenAI Service',
+        'v2_callOpenAIJson',
+        'JSON_PARSE_ERROR',
+        firstError.message,
+        options.input || options.prompt || '',
+        text
+      );
+
+      throw new Error('OpenAI returned invalid JSON: ' + firstError.message);
+    }
+
+    return {
+      statusCode: response.statusCode,
+      model: response.model,
+      raw: response.raw,
+      text: text,
+      json: JSON.parse(extracted)
+    };
+  }
+}
+
+
+/**
+ * Gets OpenAI API key from Script Properties.
+ */
+function v2_getOpenAIApiKey_() {
+  const apiKey = PropertiesService.getScriptProperties().getProperty('OPENAI_API_KEY');
+
+  if (v2_isBlank(apiKey)) {
+    throw new Error('OPENAI_API_KEY is not set in Script Properties.');
+  }
+
+  return apiKey;
+}
+
+
+/**
+ * Extracts text from a Responses API response.
+ */
+function v2_extractOpenAIText_(json) {
+  if (!json) return '';
+
+  if (json.output_text) {
+    return String(json.output_text).trim();
+  }
+
+  if (json.output && Array.isArray(json.output)) {
+    const parts = [];
+
+    json.output.forEach(item => {
+      if (item.content && Array.isArray(item.content)) {
+        item.content.forEach(contentItem => {
+          if (contentItem.text) {
+            parts.push(contentItem.text);
+          }
+        });
+      }
+    });
+
+    if (parts.length > 0) {
+      return parts.join('\n').trim();
+    }
+  }
+
+  return JSON.stringify(json);
+}
+
+
+/**
+ * Attempts to extract JSON from text.
+ */
+function v2_extractJsonFromText_(text) {
+  if (v2_isBlank(text)) return null;
+
+  const clean = String(text)
+    .replace(/```json/gi, '')
+    .replace(/```/g, '')
+    .trim();
+
+  if (clean.startsWith('{') && clean.endsWith('}')) {
+    return clean;
+  }
+
+  if (clean.startsWith('[') && clean.endsWith(']')) {
+    return clean;
+  }
+
+  const objectStart = clean.indexOf('{');
+  const objectEnd = clean.lastIndexOf('}');
+
+  if (objectStart !== -1 && objectEnd !== -1 && objectEnd > objectStart) {
+    return clean.substring(objectStart, objectEnd + 1);
+  }
+
+  return null;
+}
+
+
+/**
+ * Test function.
+ * Requires OPENAI_API_KEY to be set in Script Properties.
+ */
+function v2_testOpenAIService() {
+  const response = v2_callOpenAI({
+    model: 'gpt-4.1-mini',
+    input: 'Reply with exactly this sentence: OpenAI service connected.',
+    temperature: 0,
+    maxTokens: 50
+  });
+
+  SpreadsheetApp.getUi().alert(
+    `OpenAI Service Test Complete\n\n${response.text}`
+  );
+}
+
+
+/**
+ * Test JSON function.
+ * Requires OPENAI_API_KEY to be set in Script Properties.
+ */
+function v2_testOpenAIJsonService() {
+  const response = v2_callOpenAIJson({
+    model: 'gpt-4.1-mini',
+    input:
+      'Return JSON only with these fields: {"status":"connected","service":"OpenAI","version":"V2"}.',
+    temperature: 0,
+    maxTokens: 100
+  });
+
+  SpreadsheetApp.getUi().alert(
+    `OpenAI JSON Test Complete\n\n` +
+    JSON.stringify(response.json, null, 2)
+  );
+}
