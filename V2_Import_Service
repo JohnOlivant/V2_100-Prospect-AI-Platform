@@ -1,0 +1,429 @@
+/***************************************
+ * 100 Prospect AI Platform
+ * V2_Import_Service.gs
+ * Apollo CSV folder import service
+ ***************************************/
+
+function v2_importApolloCSVs() {
+  const props = PropertiesService.getScriptProperties();
+
+  const exportsFolderId = props.getProperty('APOLLO_EXPORTS_FOLDER_ID');
+  const processedFolderId = props.getProperty('APOLLO_PROCESSED_FOLDER_ID');
+
+  if (v2_isBlank(exportsFolderId)) {
+    throw new Error('APOLLO_EXPORTS_FOLDER_ID is not set in Script Properties.');
+  }
+
+  if (v2_isBlank(processedFolderId)) {
+    throw new Error('APOLLO_PROCESSED_FOLDER_ID is not set in Script Properties.');
+  }
+
+  const exportsFolder = DriveApp.getFolderById(exportsFolderId);
+  const processedFolder = DriveApp.getFolderById(processedFolderId);
+  const prospectSheet = v2_getConfiguredSheet('PROSPECT_QUEUE');
+
+  const files = exportsFolder.getFilesByType(MimeType.CSV);
+
+  let filesProcessed = 0;
+  let imported = 0;
+  let skipped = 0;
+  let failed = 0;
+
+  while (files.hasNext()) {
+    const file = files.next();
+
+    try {
+      const result = v2_processApolloCsvFile_(file, prospectSheet);
+
+      filesProcessed++;
+      imported += result.imported;
+      skipped += result.skipped;
+      failed += result.failed;
+
+      file.moveTo(processedFolder);
+
+      v2_logInfo(
+        '',
+        'Import Service',
+        'v2_importApolloCSVs',
+        'FILE_PROCESSED',
+        `Processed Apollo CSV: ${file.getName()}. Imported: ${result.imported}, Skipped: ${result.skipped}, Failed: ${result.failed}.`,
+        '',
+        ''
+      );
+
+    } catch (error) {
+      failed++;
+
+      v2_logException(
+        '',
+        'Import Service',
+        'v2_importApolloCSVs',
+        error,
+        file.getName(),
+        ''
+      );
+    }
+  }
+
+  SpreadsheetApp.getUi().alert(
+    `Apollo Import Complete\n\n` +
+    `Files processed: ${filesProcessed}\n` +
+    `Prospects imported: ${imported}\n` +
+    `Skipped: ${skipped}\n` +
+    `Failed: ${failed}`
+  );
+}
+
+
+function v2_processApolloCsvFile_(file, prospectSheet) {
+  const csvText = file.getBlob().getDataAsString();
+  const rows = Utilities.parseCsv(csvText);
+
+  if (!rows || rows.length < 2) {
+    return {
+      imported: 0,
+      skipped: 0,
+      failed: 0
+    };
+  }
+
+  const headers = rows[0].map(h => String(h).trim());
+
+  let imported = 0;
+  let skipped = 0;
+  let failed = 0;
+
+  const existingKeys = v2_getExistingProspectKeys_(prospectSheet);
+
+  rows.slice(1).forEach(row => {
+    try {
+      const apolloRow = v2_arrayRowToObject_(headers, row);
+      const prospectRecord = v2_mapApolloRowToProspectQueue_(apolloRow);
+
+      const duplicateKey = v2_buildProspectDuplicateKey_(
+        prospectRecord['Email Address'],
+        prospectRecord['Company Name'],
+        prospectRecord['Contact Name']
+      );
+
+      if (existingKeys.has(duplicateKey)) {
+        skipped++;
+        return;
+      }
+
+      prospectRecord['Prospect ID'] = v2_getNextProspectId();
+      prospectRecord['Date Added'] = new Date();
+      prospectRecord['Source'] = 'Apollo';
+      prospectRecord['Data Completeness Score'] = v2_calculateProspectCompleteness_(prospectRecord);
+      prospectRecord['Duplicate Check Status'] = 'Unique';
+      prospectRecord['Process Status'] = V2_CONFIG.STATUS.PROCESS.NEW;
+      prospectRecord['Last Updated'] = new Date();
+
+      v2_appendObjectRow(prospectSheet, prospectRecord);
+      existingKeys.add(duplicateKey);
+
+      imported++;
+
+    } catch (error) {
+      failed++;
+
+      v2_logException(
+        '',
+        'Import Service',
+        'v2_processApolloCsvFile_',
+        error,
+        JSON.stringify(row),
+        ''
+      );
+    }
+  });
+
+  return {
+    imported: imported,
+    skipped: skipped,
+    failed: failed
+  };
+}
+
+
+function v2_mapApolloRowToProspectQueue_(apolloRow) {
+  const companyName = v2_getFirstApolloValue_(apolloRow, [
+    'Company',
+    'Company Name',
+    'Organization Name',
+    'Organization',
+    'Account Name'
+  ]);
+
+  const website = v2_getFirstApolloValue_(apolloRow, [
+    'Website',
+    'Company Website',
+    'Organization Website',
+    'Account Website'
+  ]);
+
+  const industry = v2_getFirstApolloValue_(apolloRow, [
+    'Industry',
+    'Company Industry',
+    'Organization Industry'
+  ]);
+
+  const location = v2_getFirstApolloValue_(apolloRow, [
+    'Location',
+    'Company Location',
+    'Organization Location',
+    'City',
+    'State',
+    'Country'
+  ]);
+
+  const employeeSize = v2_getFirstApolloValue_(apolloRow, [
+    'Employee Count',
+    'Employees',
+    '# Employees',
+    'Company Headcount',
+    'Organization Headcount',
+    'Estimated Number of Employees'
+  ]);
+
+  const turnoverEstimate = v2_getFirstApolloValue_(apolloRow, [
+    'Annual Revenue',
+    'Revenue',
+    'Estimated Revenue',
+    'Company Revenue'
+  ]);
+
+  const firstName = v2_getFirstApolloValue_(apolloRow, [
+    'First Name',
+    'FirstName'
+  ]);
+
+  const lastName = v2_getFirstApolloValue_(apolloRow, [
+    'Last Name',
+    'LastName'
+  ]);
+
+  let contactName = v2_getFirstApolloValue_(apolloRow, [
+    'Name',
+    'Full Name',
+    'Contact Name',
+    'Person Name'
+  ]);
+
+  if (v2_isBlank(contactName)) {
+    contactName = `${firstName} ${lastName}`.trim();
+  }
+
+  const jobTitle = v2_getFirstApolloValue_(apolloRow, [
+    'Title',
+    'Job Title',
+    'Position'
+  ]);
+
+  const email = v2_getFirstApolloValue_(apolloRow, [
+    'Email',
+    'Email Address',
+    'Work Email',
+    'Primary Email'
+  ]);
+
+  const phone = v2_getFirstApolloValue_(apolloRow, [
+    'Corporate Phone',
+    'Company Phone',
+    'Phone',
+    'Work Phone',
+    'Phone Number'
+  ]);
+
+  const linkedin = v2_getFirstApolloValue_(apolloRow, [
+    'LinkedIn URL',
+    'Linkedin URL',
+    'LinkedIn',
+    'Person Linkedin Url',
+    'Person LinkedIn URL'
+  ]);
+
+  const offerType = v2_getFirstApolloValue_(apolloRow, [
+    'Offer Type'
+  ]);
+
+  return {
+    'Prospect ID': '',
+    'Date Added': '',
+    'Source': 'Apollo',
+    'Company Name': companyName,
+    'Website': website,
+    'Industry': industry,
+    'Location': location,
+    'Employee Size': employeeSize,
+    'Turnover Estimate': turnoverEstimate,
+    'Contact Name': contactName,
+    'Job Title': jobTitle,
+    'Email Address': email,
+    'Corporate Phone': phone,
+    'LinkedIn URL': linkedin,
+    'Offer Type': offerType || '',
+    'Data Completeness Score': '',
+    'Duplicate Check Status': '',
+    'Ready For AI': '',
+    'Process Status': '',
+    'Last Updated': '',
+    'Notes': ''
+  };
+}
+
+
+function v2_getExistingProspectKeys_(prospectSheet) {
+  const data = v2_getDataAsObjects(prospectSheet);
+  const keys = new Set();
+
+  data.forEach(row => {
+    const key = v2_buildProspectDuplicateKey_(
+      row['Email Address'],
+      row['Company Name'],
+      row['Contact Name']
+    );
+
+    if (key) {
+      keys.add(key);
+    }
+  });
+
+  return keys;
+}
+
+
+function v2_buildProspectDuplicateKey_(email, companyName, contactName) {
+  const normalEmail = v2_normaliseText(email);
+
+  if (normalEmail) {
+    return `email:${normalEmail}`;
+  }
+
+  const company = v2_normaliseText(companyName);
+  const contact = v2_normaliseText(contactName);
+
+  if (company || contact) {
+    return `company_contact:${company}|${contact}`;
+  }
+
+  return '';
+}
+
+
+function v2_arrayRowToObject_(headers, row) {
+  const obj = {};
+
+  headers.forEach((header, index) => {
+    obj[header] = row[index] || '';
+  });
+
+  return obj;
+}
+
+
+function v2_getFirstApolloValue_(apolloRow, possibleHeaders) {
+  for (let i = 0; i < possibleHeaders.length; i++) {
+    const header = possibleHeaders[i];
+
+    if (
+      Object.prototype.hasOwnProperty.call(apolloRow, header) &&
+      !v2_isBlank(apolloRow[header])
+    ) {
+      return apolloRow[header];
+    }
+  }
+
+  return '';
+}
+
+
+function v2_calculateProspectCompleteness_(record) {
+  const fields = [
+    'Company Name',
+    'Website',
+    'Industry',
+    'Location',
+    'Employee Size',
+    'Contact Name',
+    'Job Title',
+    'Email Address',
+    'Corporate Phone',
+    'LinkedIn URL',
+    'Offer Type'
+  ];
+
+  const populated = fields.filter(field => !v2_isBlank(record[field])).length;
+
+  return Math.round((populated / fields.length) * 100);
+}
+
+
+/**
+ * Test folder access without importing anything.
+ */
+function v2_testApolloFolderAccess() {
+  const props = PropertiesService.getScriptProperties();
+
+  const exportsFolderId = props.getProperty('APOLLO_EXPORTS_FOLDER_ID');
+  const processedFolderId = props.getProperty('APOLLO_PROCESSED_FOLDER_ID');
+
+  const exportsFolder = DriveApp.getFolderById(exportsFolderId);
+  const processedFolder = DriveApp.getFolderById(processedFolderId);
+
+  const files = exportsFolder.getFilesByType(MimeType.CSV);
+  let fileCount = 0;
+
+  while (files.hasNext()) {
+    files.next();
+    fileCount++;
+  }
+
+  SpreadsheetApp.getUi().alert(
+    `Apollo Folder Test Complete\n\n` +
+    `Exports folder: ${exportsFolder.getName()}\n` +
+    `Processed folder: ${processedFolder.getName()}\n` +
+    `CSV files waiting: ${fileCount}`
+  );
+}
+
+
+/**
+ * Test mapping using the first CSV file but does not write or move file.
+ */
+function v2_testApolloCsvMapping() {
+  const props = PropertiesService.getScriptProperties();
+  const exportsFolderId = props.getProperty('APOLLO_EXPORTS_FOLDER_ID');
+
+  const exportsFolder = DriveApp.getFolderById(exportsFolderId);
+  const files = exportsFolder.getFilesByType(MimeType.CSV);
+
+  if (!files.hasNext()) {
+    SpreadsheetApp.getUi().alert('No CSV files found in Apollo Exports.');
+    return;
+  }
+
+  const file = files.next();
+  const csvText = file.getBlob().getDataAsString();
+  const rows = Utilities.parseCsv(csvText);
+
+  if (!rows || rows.length < 2) {
+    SpreadsheetApp.getUi().alert('CSV file has no data rows.');
+    return;
+  }
+
+  const headers = rows[0].map(h => String(h).trim());
+  const firstRow = v2_arrayRowToObject_(headers, rows[1]);
+  const mapped = v2_mapApolloRowToProspectQueue_(firstRow);
+
+  SpreadsheetApp.getUi().alert(
+    `Apollo Mapping Test\n\n` +
+    `File: ${file.getName()}\n\n` +
+    `Company: ${mapped['Company Name']}\n` +
+    `Contact: ${mapped['Contact Name']}\n` +
+    `Email: ${mapped['Email Address']}\n` +
+    `Website: ${mapped['Website']}\n` +
+    `Offer Type: ${mapped['Offer Type'] || '(blank)'}`
+  );
+}
