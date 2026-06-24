@@ -1,0 +1,212 @@
+function sendApprovedAIOutreachToCommandCentre() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+
+  const sourceSheet = ss.getSheetByName("AI Outreach Asset Repository");
+  const targetSheet = ss.getSheetByName("Outreach Command Centre");
+
+  if (!sourceSheet) throw new Error("AI Outreach Asset Repository sheet not found.");
+  if (!targetSheet) throw new Error("Outreach Command Centre sheet not found.");
+
+  const sourceData = sourceSheet.getDataRange().getValues();
+  const targetData = targetSheet.getDataRange().getValues();
+
+  const sourceHeaders = sourceData[0];
+  const targetHeaders = targetData[0];
+
+  const sourceMap = getHeaderMap_(sourceHeaders);
+  const targetMap = getHeaderMap_(targetHeaders);
+
+  const requiredSourceHeaders = [
+    "Outreach Asset ID",
+    "Prospect ID",
+    "Campaign ID",
+    "Company Name",
+    "Contact Name",
+    "Offer Type",
+    "Lead Fit",
+    "Outreach Angle",
+    "LinkedIn Connection Message",
+    "Call Opener",
+    "Approval Status",
+    "CRM Status",
+    "Push Date",
+    "Sync Result"
+  ];
+
+  requiredSourceHeaders.forEach(header => {
+    if (sourceMap[header] === undefined) {
+      throw new Error("Missing source header in AI Outreach: " + header);
+    }
+  });
+
+  const rowsToAdd = [];
+  const sourceUpdates = [];
+
+  for (let i = 1; i < sourceData.length; i++) {
+    const row = sourceData[i];
+
+    const approvalStatus = String(row[sourceMap["Approval Status"]] || "").trim().toLowerCase();
+    const crmStatus = String(row[sourceMap["CRM Status"]] || "").trim();
+
+    if (approvalStatus !== "approved") continue;
+    if (crmStatus) continue;
+
+    const campaignId = row[sourceMap["Campaign ID"]] || generateCampaignId_();
+    const linkedInMessage = row[sourceMap["LinkedIn Connection Message"]];
+    const callOpener = row[sourceMap["Call Opener"]];
+
+    const hasLinkedIn = linkedInMessage ? "Yes" : "";
+    const hasPhone = callOpener ? "Yes" : "";
+
+    let recommendedChannels = "Email";
+    if (hasLinkedIn && hasPhone) recommendedChannels = "Email + LinkedIn + Phone";
+    else if (hasLinkedIn) recommendedChannels = "Email + LinkedIn";
+    else if (hasPhone) recommendedChannels = "Email + Phone";
+
+    const newRow = targetHeaders.map(header => {
+      switch (header) {
+        case "Campaign ID":
+          return campaignId;
+
+        case "Prospect ID":
+          return row[sourceMap["Prospect ID"]] || "";
+
+        case "Company":
+          return row[sourceMap["Company Name"]] || "";
+
+        case "Contact":
+          return row[sourceMap["Contact Name"]] || "";
+
+        case "Job Title":
+          return "";
+
+        case "AI Score":
+          return "";
+
+        case "Offer":
+          return row[sourceMap["Offer Type"]] || "";
+
+        case "Priority":
+          return row[sourceMap["Lead Fit"]] || "";
+
+        case "Recommended Strategy":
+          return row[sourceMap["Outreach Angle"]] || "";
+
+        case "Recommended Channels":
+          return recommendedChannels;
+
+        case "Recommended Sequence":
+          return recommendedChannels;
+
+        case "Confidence":
+          return "";
+
+        case "Selected Channels":
+          return recommendedChannels;
+
+        case "Email":
+          return "Yes";
+
+        case "LinkedIn":
+          return hasLinkedIn;
+
+        case "WhatsApp":
+          return "";
+
+        case "Phone":
+          return hasPhone;
+
+        case "Campaign Status":
+          return "Approved";
+
+        case "Next Action":
+          return "Launch Campaign";
+
+        case "Next Action Date":
+          return new Date();
+
+        case "Fluent Status":
+          return "Not Sent";
+
+        case "LinkedIn Status":
+          return "Not Sent";
+
+        case "Last Contacted":
+          return "";
+
+        case "Emails Sent":
+          return 0;
+
+        case "LinkedIn Sent":
+          return 0;
+
+        case "Replies":
+          return 0;
+
+        case "Meetings":
+          return 0;
+
+        case "Opportunity Value":
+          return "";
+
+        case "Won":
+          return "Pending";
+
+        default:
+          return "";
+      }
+    });
+
+    rowsToAdd.push(newRow);
+
+    sourceUpdates.push({
+      rowNumber: i + 1,
+      campaignId
+    });
+  }
+
+  if (rowsToAdd.length === 0) {
+    SpreadsheetApp.getUi().alert("No approved AI Outreach records found to send.");
+    return;
+  }
+
+  const startRow = targetSheet.getLastRow() + 1;
+
+  targetSheet
+    .getRange(startRow, 1, rowsToAdd.length, targetHeaders.length)
+    .setValues(rowsToAdd);
+
+  sourceUpdates.forEach(item => {
+    const rowNumber = item.rowNumber;
+
+    sourceSheet.getRange(rowNumber, sourceMap["CRM Status"] + 1).setValue("Sent to Command Centre");
+    sourceSheet.getRange(rowNumber, sourceMap["Push Date"] + 1).setValue(new Date());
+    sourceSheet.getRange(rowNumber, sourceMap["Sync Result"] + 1).setValue("Success");
+
+    if (sourceMap["Campaign ID"] !== undefined) {
+      sourceSheet.getRange(rowNumber, sourceMap["Campaign ID"] + 1).setValue(item.campaignId);
+    }
+  });
+
+  SpreadsheetApp.getUi().alert(
+    rowsToAdd.length + " approved campaign(s) sent to the Outreach Command Centre."
+  );
+}
+
+function getHeaderMap_(headers) {
+  const map = {};
+  headers.forEach((header, index) => {
+    if (header) map[String(header).trim()] = index;
+  });
+  return map;
+}
+
+function generateCampaignId_() {
+  const props = PropertiesService.getScriptProperties();
+  const current = Number(props.getProperty("CAMPAIGN_COUNTER") || 0);
+  const next = current + 1;
+
+  props.setProperty("CAMPAIGN_COUNTER", String(next));
+
+  return "CMP-" + String(next).padStart(4, "0");
+}
