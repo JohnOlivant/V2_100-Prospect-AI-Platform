@@ -218,13 +218,16 @@ function v2_validatePrompt(prompt) {
   const requiredFields = [
     'Prompt ID',
     'Prompt Name',
-    'Prompt Category',
-    'Workflow Stage',
-    'Prompt Text',
-    'Model'
+    'Prompt Text'
   ];
 
   const missing = requiredFields.filter(field => v2_isBlank(prompt[field]));
+
+  const status = v2_normaliseText(prompt['Active Status']);
+
+  if (status && !['active', 'true', 'yes'].includes(status)) {
+    missing.push('Active Status must be Active');
+  }
 
   return {
     valid: missing.length === 0,
