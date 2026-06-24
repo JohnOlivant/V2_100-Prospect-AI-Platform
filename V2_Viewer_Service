@@ -83,30 +83,86 @@ function v2_buildProspectViewerHtml_(record, rowNumber) {
  ***************************************/
 
 function v2_buildAIResearchViewerHtml_(record, rowNumber) {
+  const score = record['Prospect Score'] || '';
+  const leadFit = record['Lead Fit'] || '';
+  const reviewStatus = record['Human Review Status'] || '';
+
   return v2_wrapViewerHtml_(
     'AI Research Viewer',
-    `${v2_field_(record, 'Company Name')} — Row ${rowNumber}`,
+    `${v2_field_(record, 'Company Name')} — ${v2_field_(record, 'Recommended Offer Type')} — Row ${rowNumber}`,
     `
-    ${v2_section_('Prospect', [
-      'Intelligence ID', 'Prospect ID', 'Research Date', 'Company Name',
-      'Website', 'Industry', 'Location', 'Employee Size', 'Turnover Estimate',
-      'Contact Name', 'Job Title', 'Email Address'
+    <div class="summary-cards">
+      <div class="summary-card">
+        <div class="summary-label">Prospect Score</div>
+        <div class="summary-value">${v2_field_(record, 'Prospect Score')}</div>
+      </div>
+      <div class="summary-card">
+        <div class="summary-label">Lead Fit</div>
+        <div class="summary-value">${v2_field_(record, 'Lead Fit')}</div>
+      </div>
+      <div class="summary-card">
+        <div class="summary-label">Offer</div>
+        <div class="summary-value">${v2_field_(record, 'Recommended Offer Type')}</div>
+      </div>
+      <div class="summary-card">
+        <div class="summary-label">Review Status</div>
+        <div class="summary-value">${v2_field_(record, 'Human Review Status')}</div>
+      </div>
+    </div>
+
+    ${v2_section_('Prospect Snapshot', [
+      'Intelligence ID',
+      'Prospect ID',
+      'Research Date',
+      'Company Name',
+      'Website',
+      'Industry',
+      'Location',
+      'Employee Size',
+      'Turnover Estimate',
+      'Contact Name',
+      'Job Title',
+      'Email Address'
     ], record)}
 
-    ${v2_section_('AI Intelligence', [
-      'Company Summary', 'Commercial Summary', 'Business Model Notes',
-      'Growth Signals', 'Pricing Signals', 'Diagnostic Signals',
-      'Exit Readiness Signals', 'Key Pain Points', 'Opportunity Angle'
-    ], record)}
+    <div class="section">
+      <h2>AI Intelligence Summary</h2>
+      ${v2_longTextBlock_(record, 'Company Summary')}
+      ${v2_longTextBlock_(record, 'Commercial Summary')}
+      ${v2_longTextBlock_(record, 'Business Model Notes')}
+    </div>
+
+    <div class="section">
+  <h2>Commercial Signals</h2>
+  ${v2_longTextBlock_(record, 'Growth Signals')}
+  ${v2_longTextBlock_(record, 'Pricing Signals')}
+  ${v2_longTextBlock_(record, 'Diagnostic Signals')}
+  ${v2_longTextBlock_(record, 'Exit Readiness Signals')}
+  ${v2_longTextBlock_(record, 'Finance Function Signals')}
+</div>
+
+    <div class="section">
+      <h2>Pain Points & Opportunity</h2>
+      ${v2_longTextBlock_(record, 'Key Pain Points')}
+      ${v2_longTextBlock_(record, 'Opportunity Angle')}
+      ${v2_longTextBlock_(record, 'AI Reason')}
+    </div>
 
     ${v2_section_('Scoring & Recommendation', [
-      'Recommended Offer Type', 'Prospect Score', 'Lead Fit',
-      'Confidence Score', 'AI Reason'
+      'Recommended Offer Type',
+      'Prospect Score',
+      'Lead Fit',
+      'Confidence Score'
     ], record)}
 
     ${v2_section_('Prompt & Review', [
-      'Research Prompt ID Used', 'AI Model', 'AI Timestamp',
-      'Human Review Status', 'Reviewed By', 'Review Date', 'Review Notes'
+      'Research Prompt ID Used',
+      'AI Model',
+      'AI Timestamp',
+      'Human Review Status',
+      'Reviewed By',
+      'Review Date',
+      'Review Notes'
     ], record)}
     `
   );
@@ -119,16 +175,46 @@ function v2_buildAIResearchViewerHtml_(record, rowNumber) {
 function v2_buildOutreachViewerHtml_(record, rowNumber) {
   return v2_wrapViewerHtml_(
     'Outreach Viewer',
-    `${v2_field_(record, 'Company Name')} — Row ${rowNumber}`,
+    `${v2_field_(record, 'Company Name')} — ${v2_field_(record, 'Offer Type')} — Row ${rowNumber}`,
     `
+    <div class="summary-cards">
+      <div class="summary-card">
+        <div class="summary-label">Approval Status</div>
+        <div class="summary-value">${v2_field_(record, 'Approval Status')}</div>
+      </div>
+      <div class="summary-card">
+        <div class="summary-label">CRM Status</div>
+        <div class="summary-value">${v2_field_(record, 'CRM Status')}</div>
+      </div>
+      <div class="summary-card">
+        <div class="summary-label">Lead Fit</div>
+        <div class="summary-value">${v2_field_(record, 'Lead Fit')}</div>
+      </div>
+      <div class="summary-card">
+        <div class="summary-label">Campaign ID</div>
+        <div class="summary-value">${v2_field_(record, 'Campaign ID')}</div>
+      </div>
+    </div>
+
     ${v2_section_('Prospect', [
-      'Outreach Asset ID', 'Prospect ID', 'Campaign ID', 'Date Generated',
-      'Company Name', 'Contact Name', 'Email Address', 'Offer Type', 'Lead Fit'
+      'Outreach Asset ID',
+      'Prospect ID',
+      'Campaign ID',
+      'Date Generated',
+      'Company Name',
+      'Contact Name',
+      'Email Address',
+      'Offer Type',
+      'Lead Fit'
     ], record)}
 
-    ${v2_section_('Outreach Intelligence', [
-      'Outreach Angle', 'Personalisation Point', 'Key Pain Point', 'Suggested CTA'
-    ], record)}
+    <div class="section">
+      <h2>Outreach Strategy</h2>
+      ${v2_longTextBlock_(record, 'Outreach Angle')}
+      ${v2_longTextBlock_(record, 'Personalisation Point')}
+      ${v2_longTextBlock_(record, 'Key Pain Point')}
+      ${v2_longTextBlock_(record, 'Suggested CTA')}
+    </div>
 
     <div class="section">
       <h2>Email Sequence</h2>
@@ -139,17 +225,28 @@ function v2_buildOutreachViewerHtml_(record, rowNumber) {
     </div>
 
     <div class="section">
-      <h2>Other Outreach Assets</h2>
-      ${v2_textBlock_(record, 'LinkedIn Connection Message')}
-      ${v2_textBlock_(record, 'LinkedIn Follow-Up Message')}
-      ${v2_textBlock_(record, 'Call Opener')}
-      ${v2_textBlock_(record, 'Voicemail Script')}
+      <h2>LinkedIn & Phone</h2>
+      ${v2_longTextBlock_(record, 'LinkedIn Connection Message')}
+      ${v2_longTextBlock_(record, 'LinkedIn Follow-Up Message')}
+      ${v2_longTextBlock_(record, 'Call Opener')}
+      ${v2_longTextBlock_(record, 'Voicemail Script')}
     </div>
 
-    ${v2_section_('Approval & CRM', [
-      'Outreach Prompt ID Used', 'AI Model', 'Generation Timestamp',
-      'Approval Status', 'Approved By', 'Approval Date', 'Revision Notes',
-      'CRM Status', 'FluentCRM Contact ID', 'Push Date', 'Sync Result'
+    ${v2_section_('AI & Approval', [
+      'Outreach Prompt ID Used',
+      'AI Model',
+      'Generation Timestamp',
+      'Approval Status',
+      'Approved By',
+      'Approval Date',
+      'Revision Notes'
+    ], record)}
+
+    ${v2_section_('CRM Sync', [
+      'CRM Status',
+      'FluentCRM Contact ID',
+      'Push Date',
+      'Sync Result'
     ], record)}
     `
   );
@@ -227,7 +324,14 @@ function v2_textBlock_(record, field) {
     </div>
   `;
 }
-
+function v2_longTextBlock_(record, field) {
+  return `
+    <div class="content-block">
+      <h3>${field}</h3>
+      <div class="body">${v2_field_(record, field)}</div>
+    </div>
+  `;
+}
 function v2_field_(record, label) {
   const value = record[label];
 
@@ -381,7 +485,63 @@ function v2_viewerStyles_() {
       button:hover {
         background: #374151;
       }
+.summary-cards {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 14px;
+  margin-bottom: 18px;
+}
 
+.summary-card {
+  background: #ffffff;
+  border: 1px solid #e5e7eb;
+  border-radius: 14px;
+  padding: 16px;
+}
+
+.summary-label {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: #6b7280;
+  font-weight: bold;
+  margin-bottom: 6px;
+}
+
+.summary-value {
+  font-size: 20px;
+  line-height: 1.3;
+  color: #111827;
+  font-weight: bold;
+}
+.variable-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.variable-pill {
+  background: #eef2ff;
+  border: 1px solid #c7d2fe;
+  color: #111827;
+  padding: 7px 10px;
+  border-radius: 999px;
+  font-size: 13px;
+}
+
+.prompt-block {
+  white-space: pre-wrap;
+  word-wrap: break-word;
+  background: #111827;
+  color: #f9fafb;
+  border-radius: 12px;
+  padding: 18px;
+  font-family: Consolas, Monaco, monospace;
+  font-size: 13px;
+  line-height: 1.6;
+  max-height: 520px;
+  overflow-y: auto;
+}
       @media print {
         .no-print {
           display: none !important;
@@ -398,4 +558,125 @@ function v2_viewerStyles_() {
       }
     </style>
   `;
+}
+function v2_viewSelectedPrompt() {
+  v2_showSelectedRecordViewer_({
+    requiredSheet: V2_CONFIG.SHEETS.PROMPT_LIBRARY,
+    title: 'Prompt Viewer',
+    builder: v2_buildPromptViewerHtml_
+  });
+}
+function v2_buildPromptViewerHtml_(record, rowNumber) {
+  const promptText = record['Prompt Text'] || '';
+  const inputVariables = record['Input Variables'] || '';
+
+  return v2_wrapViewerHtml_(
+    'Prompt Viewer',
+    `${v2_field_(record, 'Prompt Name')} — Row ${rowNumber}`,
+    `
+    <div class="summary-cards">
+      <div class="summary-card">
+        <div class="summary-label">Prompt ID</div>
+        <div class="summary-value">${v2_field_(record, 'Prompt ID')}</div>
+      </div>
+      <div class="summary-card">
+        <div class="summary-label">Status</div>
+        <div class="summary-value">${v2_field_(record, 'Status')}</div>
+      </div>
+      <div class="summary-card">
+        <div class="summary-label">Version</div>
+        <div class="summary-value">${v2_field_(record, 'Version')}</div>
+      </div>
+      <div class="summary-card">
+        <div class="summary-label">Last Updated</div>
+        <div class="summary-value">${v2_field_(record, 'Last Updated')}</div>
+      </div>
+    </div>
+
+    ${v2_section_('Prompt Summary', [
+      'Prompt ID',
+      'Prompt Name',
+      'Description',
+      'Status',
+      'Version',
+      'Last Updated',
+      'Notes'
+    ], record)}
+
+    <div class="section">
+      <h2>Input Variables</h2>
+      <div class="variable-list">
+        ${v2_renderPromptVariables_(inputVariables)}
+      </div>
+    </div>
+
+    <div class="section">
+      <h2>Prompt Statistics</h2>
+      <div class="grid">
+        <div class="info-row">
+          <div class="label">Characters</div>
+          <div class="value">${promptText.length}</div>
+        </div>
+        <div class="info-row">
+          <div class="label">Words</div>
+          <div class="value">${v2_countWords_(promptText)}</div>
+        </div>
+        <div class="info-row">
+          <div class="label">Approx Tokens</div>
+          <div class="value">${Math.ceil(promptText.length / 4)}</div>
+        </div>
+        <div class="info-row">
+          <div class="label">Variables Listed</div>
+          <div class="value">${v2_countPromptVariables_(inputVariables)}</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="section">
+      <h2>Prompt Text</h2>
+      <pre class="prompt-block">${v2_escapeHtml_(promptText)}</pre>
+    </div>
+    `
+  );
+}
+function v2_renderPromptVariables_(inputVariables) {
+  if (v2_isBlank(inputVariables)) {
+    return '<span class="muted">No input variables listed</span>';
+  }
+
+  return String(inputVariables)
+    .split(',')
+    .map(item => item.trim())
+    .filter(Boolean)
+    .map(item => `<span class="variable-pill">${v2_escapeHtml_(item)}</span>`)
+    .join('');
+}
+
+function v2_countPromptVariables_(inputVariables) {
+  if (v2_isBlank(inputVariables)) return 0;
+
+  return String(inputVariables)
+    .split(',')
+    .map(item => item.trim())
+    .filter(Boolean)
+    .length;
+}
+
+function v2_countWords_(text) {
+  if (v2_isBlank(text)) return 0;
+
+  return String(text)
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean)
+    .length;
+}
+
+function v2_escapeHtml_(value) {
+  if (value === null || value === undefined) return '';
+
+  return String(value)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
 }
