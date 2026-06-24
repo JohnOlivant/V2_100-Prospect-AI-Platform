@@ -1,0 +1,98 @@
+/***************************************
+ * 100 Prospect AI Platform
+ * V2_Settings_Service.gs
+ * Central configuration service
+ ***************************************/
+
+function v2_getAllSettings() {
+  const sheet = v2_getConfiguredSheet('SETTINGS');
+  return v2_getDataAsObjects(sheet);
+}
+
+function v2_getSetting(category, settingKey, fallbackValue) {
+  const settings = v2_getAllSettings();
+
+  const match = settings.find(row => {
+    return (
+      v2_normaliseText(row['Category']) === v2_normaliseText(category) &&
+      v2_normaliseText(row['Setting Key']) === v2_normaliseText(settingKey) &&
+      v2_isSettingRowActive_(row)
+    );
+  });
+
+  if (!match) {
+    if (fallbackValue !== undefined) return fallbackValue;
+    throw new Error(`Setting not found: ${category} → ${settingKey}`);
+  }
+
+  return match['Setting Value'];
+}
+
+function v2_isSettingRowActive_(row) {
+  const value = v2_normaliseText(row['Active Status']);
+  return ['active', 'true', 'yes', 'y', '1'].includes(value);
+}
+
+function v2_getPromptIdForWorkflow(workflowType, offerType) {
+  const key = `${workflowType} - ${offerType}`;
+  return v2_getSetting('Prompt Configuration', key);
+}
+
+function v2_getAIConfig(settingKey, fallbackValue) {
+  return v2_getSetting('AI Configuration', settingKey, fallbackValue);
+}
+
+function v2_getDefaultAIModel() {
+  return v2_getAIConfig('Default Model', 'gpt-4.1-mini');
+}
+
+function v2_getResearchTemperature() {
+  return Number(v2_getAIConfig('Research Temperature', 0.3));
+}
+
+function v2_getResearchMaxTokens() {
+  return Number(v2_getAIConfig('Research Max Tokens', 1600));
+}
+
+function v2_getOutreachTemperature() {
+  return Number(v2_getAIConfig('Outreach Temperature', 0.4));
+}
+
+function v2_getOutreachMaxTokens() {
+  return Number(v2_getAIConfig('Outreach Max Tokens', 2200));
+}
+
+function v2_testSettingsService() {
+
+  const researchPromptId = v2_getPromptIdForWorkflow(
+    'Research',
+    'Business Diagnostics'
+  );
+
+  const outreachPromptId = v2_getPromptIdForWorkflow(
+    'Outreach',
+    'Business Diagnostics'
+  );
+
+  const model = v2_getDefaultAIModel();
+
+  const message =
+    `Settings Service Test Complete\n\n` +
+    `Research Prompt: ${researchPromptId}\n` +
+    `Outreach Prompt: ${outreachPromptId}\n` +
+    `Default Model: ${model}`;
+
+  Logger.log(message);
+
+  try {
+    SpreadsheetApp.getUi().alert(message);
+  } catch (e) {
+    // Running from Apps Script Editor
+  }
+
+  return {
+    researchPrompt: researchPromptId,
+    outreachPrompt: outreachPromptId,
+    model: model
+  };
+}
