@@ -1,0 +1,291 @@
+/***************************************
+ * 100 Prospect AI Platform
+ * V2_AI_Outreach_Service.gs
+ * Generates outreach assets from approved AI Intelligence records
+ ***************************************/
+
+function v2_generateOutreachAssets() {
+  const intelligenceSheet = v2_getConfiguredSheet('AI_INTELLIGENCE');
+  const outreachSheet = v2_getConfiguredSheet('AI_OUTREACH');
+
+  const intelligenceRecords = v2_getDataAsObjects(intelligenceSheet);
+
+  const approvedRecords = intelligenceRecords.filter(row => {
+    return (
+      v2_normaliseText(row['Human Review Status']) === 'approved' &&
+      !v2_outreachAlreadyExists_(outreachSheet, row['Prospect ID'])
+    );
+  });
+
+  if (approvedRecords.length === 0) {
+    v2_logInfo(
+      '',
+      'AI Outreach Service',
+      'v2_generateOutreachAssets',
+      'NO_APPROVED_RECORDS',
+      'No approved AI intelligence records found for outreach generation.',
+      '',
+      ''
+    );
+
+    return {
+      processed: 0,
+      failed: 0,
+      message: 'No approved AI intelligence records found for outreach generation.'
+    };
+  }
+
+  let processed = 0;
+  let failed = 0;
+
+  approvedRecords.forEach(record => {
+    try {
+      v2_generateSingleOutreachAsset_(outreachSheet, record);
+      processed++;
+    } catch (error) {
+      failed++;
+
+      v2_logException(
+        record['Prospect ID'] || '',
+        'AI Outreach Service',
+        'v2_generateOutreachAssets',
+        error,
+        JSON.stringify(record),
+        ''
+      );
+    }
+  });
+
+  v2_logInfo(
+    '',
+    'AI Outreach Service',
+    'v2_generateOutreachAssets',
+    'BATCH_COMPLETE',
+    `Outreach generation complete. Processed: ${processed}. Failed: ${failed}.`,
+    '',
+    ''
+  );
+
+  return {
+    processed: processed,
+    failed: failed,
+    message: `Outreach generation complete. Processed: ${processed}. Failed: ${failed}.`
+  };
+}
+
+
+function v2_generateSingleOutreachAsset_(outreachSheet, intelligenceRecord) {
+  const prospectId = intelligenceRecord['Prospect ID'];
+  const offerType = intelligenceRecord['Recommended Offer Type'] || '';
+
+  if (v2_isBlank(prospectId)) {
+    throw new Error('Prospect ID is missing from AI Intelligence record.');
+  }
+
+  if (v2_isBlank(offerType)) {
+    throw new Error(`Recommended Offer Type is missing for prospect ${prospectId}`);
+  }
+
+  const promptId = v2_getPromptIdForWorkflow('Outreach', offerType);
+const prompt = v2_getPromptById(promptId);
+  const validation = v2_validatePrompt(prompt);
+
+  if (!validation.valid) {
+    throw new Error(
+      `Outreach prompt is invalid. Missing fields: ${validation.missingFields.join(', ')}`
+    );
+  }
+
+  const variables = v2_buildPromptVariablesFromRow(intelligenceRecord);
+  const mergedPrompt = v2_mergePrompt(prompt['Prompt Text'], variables);
+
+  const model = v2_getDefaultAIModel();
+const temperature = v2_getOutreachTemperature();
+const maxTokens = v2_getOutreachMaxTokens();
+
+  v2_logInfo(
+    prospectId,
+    'AI Outreach Service',
+    'v2_generateSingleOutreachAsset_',
+    'PROCESS_STARTED',
+    'Started outreach asset generation.',
+    mergedPrompt,
+    ''
+  );
+
+  const aiResponse = v2_callOpenAIJson({
+    model: model,
+    input: mergedPrompt,
+    temperature: temperature,
+    maxTokens: maxTokens
+  });
+
+  const outreach = aiResponse.json;
+
+  const outreachAssetId = v2_getNextOutreachAssetId();
+  const campaignId = v2_getNextCampaignId();
+
+  const outreachRecord = v2_buildOutreachAssetRecord_({
+    outreachAssetId: outreachAssetId,
+    campaignId: campaignId,
+    intelligenceRecord: intelligenceRecord,
+    outreach: outreach,
+    prompt: prompt,
+    model: model
+  });
+
+  v2_appendObjectRow(outreachSheet, outreachRecord);
+
+  v2_logInfo(
+    prospectId,
+    'AI Outreach Service',
+    'v2_generateSingleOutreachAsset_',
+    'PROCESS_COMPLETE',
+    'Outreach asset generated and written to AI Outreach Asset Repository.',
+    mergedPrompt,
+    JSON.stringify(outreach)
+  );
+}
+
+
+function v2_buildOutreachAssetRecord_(data) {
+  const intelligence = data.intelligenceRecord;
+  const outreach = data.outreach || {};
+  const prompt = data.prompt || {};
+
+  return {
+    'Outreach Asset ID': data.outreachAssetId,
+    'Prospect ID': intelligence['Prospect ID'] || '',
+    'Campaign ID': data.campaignId,
+    'Date Generated': new Date(),
+
+    'Company Name': intelligence['Company Name'] || '',
+    'Contact Name': intelligence['Contact Name'] || '',
+    'Email Address': intelligence['Email Address'] || '',
+    'Offer Type': intelligence['Recommended Offer Type'] || '',
+    'Lead Fit': intelligence['Lead Fit'] || '',
+
+    'Outreach Angle': v2_firstAvailable_(outreach, [
+      'outreach_angle',
+      'Outreach Angle',
+      'suggestedOutreachAngle',
+      'aiOutreachAngle'
+    ]),
+
+    'Personalisation Point': v2_firstAvailable_(outreach, [
+      'personalisation_point',
+      'Personalisation Point',
+      'personalization_point',
+      'aiPersonalisationPoint',
+      'aiPersonalizationPoint'
+    ]),
+
+    'Key Pain Point': v2_firstAvailable_(outreach, [
+      'key_pain_point',
+      'Key Pain Point',
+      'keyPainPoint',
+      'aiKeyPainPoint'
+    ]),
+
+    'Suggested CTA': v2_firstAvailable_(outreach, [
+      'suggested_cta',
+      'Suggested CTA',
+      'suggestedCTA',
+      'aiSuggestedCTA'
+    ]),
+
+    'Email 1 Subject': v2_firstAvailable_(outreach, [
+      'email_1_subject',
+      'Email 1 Subject',
+      'email1Subject'
+    ]),
+
+    'Email 1 Body': v2_firstAvailable_(outreach, [
+      'email_1_body',
+      'Email 1 Body',
+      'email1Body'
+    ]),
+
+    'Follow Up 1 Subject': v2_firstAvailable_(outreach, [
+      'follow_up_1_subject',
+      'Follow Up 1 Subject',
+      'followUp1Subject'
+    ]),
+
+    'Follow Up 1 Body': v2_firstAvailable_(outreach, [
+      'follow_up_1_body',
+      'Follow Up 1 Body',
+      'followUp1Body'
+    ]),
+
+    'Follow Up 2 Subject': v2_firstAvailable_(outreach, [
+      'follow_up_2_subject',
+      'Follow Up 2 Subject',
+      'followUp2Subject'
+    ]),
+
+    'Follow Up 2 Body': v2_firstAvailable_(outreach, [
+      'follow_up_2_body',
+      'Follow Up 2 Body',
+      'followUp2Body'
+    ]),
+
+    'Follow Up 3 Subject': v2_firstAvailable_(outreach, [
+      'follow_up_3_subject',
+      'Follow Up 3 Subject',
+      'followUp3Subject'
+    ]),
+
+    'Follow Up 3 Body': v2_firstAvailable_(outreach, [
+      'follow_up_3_body',
+      'Follow Up 3 Body',
+      'followUp3Body'
+    ]),
+
+    'LinkedIn Connection Message': v2_firstAvailable_(outreach, [
+      'linkedin_connection_message',
+      'LinkedIn Connection Message',
+      'linkedInConnectionMessage'
+    ]),
+
+    'LinkedIn Follow-Up Message': v2_firstAvailable_(outreach, [
+      'linkedin_follow_up_message',
+      'LinkedIn Follow-Up Message',
+      'linkedInFollowUpMessage'
+    ]),
+
+    'Call Opener': v2_firstAvailable_(outreach, [
+      'call_opener',
+      'Call Opener',
+      'callOpener'
+    ]),
+
+    'Voicemail Script': v2_firstAvailable_(outreach, [
+      'voicemail_script',
+      'Voicemail Script',
+      'voicemailScript'
+    ]),
+
+    'Outreach Prompt ID Used': prompt['Prompt ID'] || '',
+    'AI Model': data.model || '',
+    'Generation Timestamp': new Date(),
+
+    'Approval Status': 'Pending Review',
+    'Approved By': '',
+    'Approval Date': '',
+    'Revision Notes': '',
+
+    'CRM Status': V2_CONFIG.STATUS.CRM.NOT_PUSHED,
+    'FluentCRM Contact ID': '',
+    'Push Date': '',
+    'Sync Result': ''
+  };
+}
+
+
+function v2_outreachAlreadyExists_(outreachSheet, prospectId) {
+  if (v2_isBlank(prospectId)) return false;
+
+  const matches = v2_findRowsByField(outreachSheet, 'Prospect ID', prospectId);
+  return matches.length > 0;
+}
