@@ -320,3 +320,19 @@ function v2_getNextEmptyRowByColumn(sheet, headerName) {
 
   return sheet.getLastRow() + 1;
 }
+function v2_showMessage(message) {
+  try {
+    SpreadsheetApp.getUi().alert(message);
+  } catch (e) {
+    Logger.log(message);
+  }
+}
+function v2_showMessage(message) {
+  Logger.log(message);
+
+  try {
+    SpreadsheetApp.getUi().alert(message);
+  } catch (e) {
+    // Running outside Spreadsheet UI
+  }
+}
