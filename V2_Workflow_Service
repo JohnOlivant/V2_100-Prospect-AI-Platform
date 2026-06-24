@@ -58,3 +58,48 @@ function v2_safeAlert_(message) {
     Logger.log(message);
   }
 }
+function v2_runOutreachGeneration() {
+  let result;
+
+  try {
+    result = v2_generateOutreachAssets();
+
+    const message =
+      `Outreach Generation Complete\n\n` +
+      `Processed: ${result.processed}\n` +
+      `Failed: ${result.failed}\n\n` +
+      `${result.message || ''}`;
+
+    v2_logInfo(
+      '',
+      'Workflow Service',
+      'v2_runOutreachGeneration',
+      'WORKFLOW_COMPLETE',
+      message,
+      '',
+      ''
+    );
+
+    v2_safeAlert_(message);
+
+    return result;
+
+  } catch (error) {
+    v2_logException(
+      '',
+      'Workflow Service',
+      'v2_runOutreachGeneration',
+      error,
+      '',
+      ''
+    );
+
+    v2_safeAlert_(`Outreach Generation Failed\n\n${error.message}`);
+
+    return {
+      processed: result ? result.processed : 0,
+      failed: result ? result.failed : 1,
+      error: error.message
+    };
+  }
+}
